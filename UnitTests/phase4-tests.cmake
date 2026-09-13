@@ -128,7 +128,7 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
         )
         add_test(UnitTestsProductOperatorLoop "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsProductOperatorLoop")
-        set_tests_properties(UnitTestsProductOperatorLoop PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        set_tests_properties(UnitTestsProductOperatorLoop PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
     endif()
 
     # Architecture invariant I23, admission half: one render-request path through

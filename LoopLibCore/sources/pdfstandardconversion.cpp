@@ -526,6 +526,23 @@ PDFOperationResult PDFStandardConversion::apply(PDFDocument* document,
     }
 
     PDFDocument candidate = *document;
+    // Transparency flattening emits DeviceRGB page rasters. Run it before
+    // normalization so the generated image XObjects are converted by the same
+    // CMYK fixup as the source document's color content.
+    const bool flattenTransparency = flattensTransparency(settings);
+    if (flattenTransparency && PDFTransparencyFlattener::hasLiveTransparency(&candidate))
+    {
+        PDFTransparencyFlattenSettings transparencySettings = settings.transparencyFlattenSettings;
+        transparencySettings.analyzeOnly = false;
+        PDFTransparencyFlattenReport transparencyReport;
+        const PDFOperationResult transparencyResult = PDFTransparencyFlattener::apply(&candidate, transparencySettings, &transparencyReport);
+        report->transparencyFlatten = transparencyReport.toJson();
+        if (!transparencyResult)
+        {
+            return transparencyResult;
+        }
+    }
+
     const bool normalizeColor = settings.normalizeColor || normalizesColorByDefault(settings.target);
     if (normalizeColor)
     {
@@ -541,24 +558,6 @@ PDFOperationResult PDFStandardConversion::apply(PDFDocument* document,
         if (!colorResult)
         {
             return colorResult;
-        }
-    }
-
-    // The flattener rasterizes every selected page, so it must only run when
-    // there is live transparency to remove - the same condition preview() uses
-    // to advertise the change. Running it on an opaque document would replace
-    // vector and text content with full-page rasters for nothing.
-    const bool flattenTransparency = flattensTransparency(settings);
-    if (flattenTransparency && PDFTransparencyFlattener::hasLiveTransparency(&candidate))
-    {
-        PDFTransparencyFlattenSettings transparencySettings = settings.transparencyFlattenSettings;
-        transparencySettings.analyzeOnly = false;
-        PDFTransparencyFlattenReport transparencyReport;
-        const PDFOperationResult transparencyResult = PDFTransparencyFlattener::apply(&candidate, transparencySettings, &transparencyReport);
-        report->transparencyFlatten = transparencyReport.toJson();
-        if (!transparencyResult)
-        {
-            return transparencyResult;
         }
     }
 

@@ -23,6 +23,7 @@
 #include "pdfrgbtocmykfixup.h"
 
 #include "pdfdocumentbuilder.h"
+#include "pdfimage.h"
 
 #include <QFile>
 #include <QtTest>
@@ -35,6 +36,7 @@ private slots:
     void rejectsMissingTargetProfile();
     void analyzesWithoutMutating();
     void convertsVectorPaintAndEmbedsOutputIntent();
+    void convertsRgbImageSamples();
 };
 
 namespace
@@ -82,6 +84,44 @@ pdf::PDFDocument buildRgbDocument()
     return builder.build();
 }
 
+pdf::PDFDocument buildRgbImageDocument()
+{
+    pdf::PDFDocumentBuilder builder;
+    const pdf::PDFObjectReference pageReference = builder.appendPage(QRectF(0, 0, 200, 200));
+
+    QImage image(2, 1, QImage::Format_RGB888);
+    image.setPixel(0, 0, qRgb(255, 0, 0));
+    image.setPixel(1, 0, qRgb(0, 255, 0));
+    pdf::PDFImage::ImageEncodeOptions imageOptions;
+    imageOptions.compression = pdf::PDFImage::ImageCompression::Flate;
+    imageOptions.colorMode = pdf::PDFImage::ImageColorMode::Preserve;
+    const pdf::PDFObjectReference imageReference = builder.addObject(
+        pdf::PDFObject::createStream(std::make_shared<pdf::PDFStream>(
+            pdf::PDFImage::createStreamFromImage(image, imageOptions))));
+
+    pdf::PDFDictionary xObjects;
+    xObjects.addEntry(pdf::PDFInplaceOrMemoryString("Im1"), pdf::PDFObject::createReference(imageReference));
+    pdf::PDFDictionary resources;
+    resources.addEntry(pdf::PDFInplaceOrMemoryString("XObject"),
+                       pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(std::move(xObjects))));
+    const QByteArray content("q 200 0 0 200 0 0 cm /Im1 Do Q\n");
+    pdf::PDFDictionary contentDictionary;
+    contentDictionary.addEntry(pdf::PDFInplaceOrMemoryString("Length"),
+                               pdf::PDFObject::createInteger(content.size()));
+    const pdf::PDFObjectReference contentReference = builder.addObject(
+        pdf::PDFObject::createStream(std::make_shared<pdf::PDFStream>(
+            std::move(contentDictionary), content)));
+
+    pdf::PDFDictionary pageUpdate;
+    pageUpdate.addEntry(pdf::PDFInplaceOrMemoryString("Contents"), pdf::PDFObject::createReference(contentReference));
+    pageUpdate.addEntry(pdf::PDFInplaceOrMemoryString("Resources"),
+                        pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(std::move(resources))));
+    builder.mergeTo(pageReference,
+                    pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(
+                        std::move(pageUpdate))));
+    return builder.build();
+}
+
 pdf::PDFRgbToCmykSettings settingsWithProfile()
 {
     pdf::PDFRgbToCmykSettings settings;
@@ -98,7 +138,7 @@ QByteArray firstPageContent(const pdf::PDFDocument& document)
     return content.isStream() ? document.getDecodedStream(content.getStream()) : QByteArray();
 }
 
-} // namespace
+}   // namespace
 
 void RgbToCmykFixupTest::rejectsMissingTargetProfile()
 {
@@ -142,6 +182,33 @@ void RgbToCmykFixupTest::convertsVectorPaintAndEmbedsOutputIntent()
     QVERIFY(report.outputIntentChanged);
     QVERIFY(report.postflightPassed);
     QVERIFY(!document.getCatalog()->getOutputIntents().empty());
+}
+
+void RgbToCmykFixupTest::convertsRgbImageSamples()
+{
+    pdf::PDFRgbToCmykSettings settings = settingsWithProfile();
+    if (settings.targetIccData.isEmpty())
+    {
+        QSKIP("Synthetic CMYK ICC profile is unavailable.");
+    }
+    pdf::PDFDocument document = buildRgbImageDocument();
+    pdf::PDFRgbToCmykReport report;
+    QVERIFY(pdf::PDFRgbToCmykFixup::writeRgbToCmyk(&document, settings, &report));
+    QCOMPARE(report.imagesConverted, 1);
+    QVERIFY(report.unsupported.isEmpty());
+    QVERIFY(report.postflightPassed);
+
+    const pdf::PDFPage* page = document.getCatalog()->getPage(0);
+    const pdf::PDFObject resources = document.getObject(page->getResources());
+    const pdf::PDFObject xObjects = document.getObject(resources.getDictionary()->get("XObject"));
+    const pdf::PDFObject image = document.getObject(xObjects.getDictionary()->get("Im1"));
+    QVERIFY(image.isStream());
+    const pdf::PDFDictionary* dictionary = image.getStream()->getDictionary();
+    const pdf::PDFObject colorSpace = document.getObject(dictionary->get("ColorSpace"));
+    QVERIFY(colorSpace.isArray());
+    QCOMPARE(document.getObject(colorSpace.getArray()->getItem(0)).getString(), QByteArrayLiteral("ICCBased"));
+    QCOMPARE(dictionary->get("BitsPerComponent").getInteger(), pdf::PDFInteger(8));
+    QCOMPARE(document.getDecodedStream(image.getStream()).size(), 8);
 }
 
 QTEST_MAIN(RgbToCmykFixupTest)

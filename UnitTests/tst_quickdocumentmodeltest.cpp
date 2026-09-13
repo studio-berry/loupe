@@ -3,6 +3,9 @@
 
 #include "pdfdocumentbuilder.h"
 #include "pdfdocumentcontext.h"
+#include "pdfdocumentsearch.h"
+#include "pdfdocumentsession.h"
+#include "pdfprocessingbudget.h"
 
 #include <QSignalSpy>
 #include <QtTest>
@@ -14,6 +17,8 @@ class QuickDocumentModelTest final : public QObject
 private slots:
     void emptyModelIsSafe();
     void searchResultsExposeOnlyValueRoles();
+    void searchesUseAnIndependentProcessingBudget();
+    void exhaustedSearchReturnsAnIncompleteResult();
     void documentCapabilitiesAreValueState();
     void lifecycleStateTracksOutputAndErrors();
 };
@@ -47,6 +52,66 @@ void QuickDocumentModelTest::searchResultsExposeOnlyValueRoles()
     QCOMPARE(model.data(index, QuickSearchResultModel::ContextRole).toString(), QStringLiteral("before match after"));
     QCOMPARE(model.query(), QStringLiteral("match"));
     QCOMPARE(model.revision(), QStringLiteral("revision"));
+}
+
+void QuickDocumentModelTest::searchesUseAnIndependentProcessingBudget()
+{
+    pdf::PDFDocumentBuilder builder;
+    const pdf::PDFObjectReference pageReference = builder.appendPage(QRectF(0, 0, 100, 100));
+    const QByteArray content("q\nQ\n");
+    pdf::PDFDictionary streamDictionary;
+    streamDictionary.addEntry(pdf::PDFInplaceOrMemoryString("Length"),
+                              pdf::PDFObject::createInteger(content.size()));
+    const pdf::PDFObjectReference streamReference = builder.addObject(
+        pdf::PDFObject::createStream(std::make_shared<pdf::PDFStream>(
+            std::move(streamDictionary), content)));
+    pdf::PDFDictionary pageUpdate;
+    pageUpdate.addEntry(pdf::PDFInplaceOrMemoryString("Contents"), pdf::PDFObject::createReference(streamReference));
+    builder.mergeTo(pageReference,
+                    pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(
+                        std::move(pageUpdate))));
+
+    pdf::PDFDocumentContext context(pdf::PDFDocumentPointer(new pdf::PDFDocument(builder.build())));
+    pdf::PDFProcessingLimits limits = context.getSession()->getProcessingLimits();
+    limits.maxRenderOperations = 2;
+    context.getSession()->setProcessingLimits(limits);
+    context.getSession()->getProcessingBudget()->chargeRenderOperation(2, QStringLiteral("previous search"));
+
+    const pdf::PDFDocumentSearchResult first = pdf::searchDocumentText(&context, QStringLiteral("absent"));
+    const pdf::PDFDocumentSearchResult second = pdf::searchDocumentText(&context, QStringLiteral("absent"));
+    QVERIFY(first.completed);
+    QVERIFY(first.admitted);
+    QVERIFY(second.completed);
+    QVERIFY(second.admitted);
+}
+
+void QuickDocumentModelTest::exhaustedSearchReturnsAnIncompleteResult()
+{
+    pdf::PDFDocumentBuilder builder;
+    const pdf::PDFObjectReference pageReference = builder.appendPage(QRectF(0, 0, 100, 100));
+    const QByteArray content("q\n");
+    pdf::PDFDictionary streamDictionary;
+    streamDictionary.addEntry(pdf::PDFInplaceOrMemoryString("Length"),
+                              pdf::PDFObject::createInteger(content.size()));
+    const pdf::PDFObjectReference streamReference = builder.addObject(
+        pdf::PDFObject::createStream(std::make_shared<pdf::PDFStream>(
+            std::move(streamDictionary), content)));
+    pdf::PDFDictionary pageUpdate;
+    pageUpdate.addEntry(pdf::PDFInplaceOrMemoryString("Contents"), pdf::PDFObject::createReference(streamReference));
+    builder.mergeTo(pageReference,
+                    pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(
+                        std::move(pageUpdate))));
+
+    pdf::PDFDocumentContext context(pdf::PDFDocumentPointer(new pdf::PDFDocument(builder.build())));
+    pdf::PDFProcessingLimits limits = context.getSession()->getProcessingLimits();
+    limits.maxRenderOperations = 0;
+    context.getSession()->setProcessingLimits(limits);
+
+    const pdf::PDFDocumentSearchResult result = pdf::searchDocumentText(&context, QStringLiteral("absent"));
+    QVERIFY(!result.completed);
+    QVERIFY(!result.admitted);
+    QVERIFY(result.matches.isEmpty());
+    QVERIFY(result.errorMessage.contains(QStringLiteral("render-operations")));
 }
 
 void QuickDocumentModelTest::documentCapabilitiesAreValueState()

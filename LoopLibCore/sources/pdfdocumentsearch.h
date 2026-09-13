@@ -23,6 +23,8 @@ struct LOOPLIBCORESHARED_EXPORT PDFDocumentSearchResult
     QVector<PDFDocumentSearchMatch> matches;
     PDFRevisionIdentity revision;
     bool admitted = false;
+    bool completed = false;
+    QString errorMessage;
 };
 
 /// Extracts and searches the text flows for every page in the context's
@@ -30,8 +32,8 @@ struct LOOPLIBCORESHARED_EXPORT PDFDocumentSearchResult
 /// still current, so presentation layers do not need to implement parsing or
 /// revision-fencing policy themselves.
 LOOPLIBCORESHARED_EXPORT PDFDocumentSearchResult searchDocumentText(PDFDocumentContext* context,
-                                                                     const QString& query,
-                                                                     Qt::CaseSensitivity sensitivity = Qt::CaseInsensitive);
+                                                                    const QString& query,
+                                                                    Qt::CaseSensitivity sensitivity = Qt::CaseInsensitive);
 
 }   // namespace pdf
 
