@@ -176,6 +176,7 @@ struct LOOPLIBCORESHARED_EXPORT PDFRepairResult
     QStringList validationFailures;
     QList<PDFRepairValidationResult> validations;
     PDFRepairFindingDelta findingDelta;
+    QJsonObject verdict;
 
     QJsonObject toJson() const;
 };

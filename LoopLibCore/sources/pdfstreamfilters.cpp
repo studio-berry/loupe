@@ -250,8 +250,8 @@ QByteArray PDFAscii85DecodeFilter::applyWithBudget(const QByteArray& data,
     {
         const uint64_t inputBytes = static_cast<uint64_t>(data.size());
         const uint64_t upperBound = inputBytes > std::numeric_limits<uint64_t>::max() / 4
-            ? std::numeric_limits<uint64_t>::max()
-            : inputBytes * 4;
+                                        ? std::numeric_limits<uint64_t>::max()
+                                        : inputBytes * 4;
         budget->checkDecodedStreamSize(upperBound, inputBytes, PDFTranslationContext::tr("ASCII85 decoded stream"));
     }
     return apply(data, objectFetcher, parameters, securityHandler);
@@ -289,15 +289,15 @@ private:
     std::array<TableItem, TABLE_SIZE> m_table;
     std::array<char, TABLE_SIZE> m_sequence;
 
-    uint32_t m_nextCode;        ///< Next code value (to be written into the table)
-    uint32_t m_nextBits;        ///< Number of bits of the next code
-    uint32_t m_early;           ///< Early (see PDF 1.7 Specification, this constant is 0 or 1, based on the dictionary value)
-    uint32_t m_inputBuffer;     ///< Input buffer, containing bits, which were read from the input byte array
-    uint32_t m_inputBits;       ///< Number of bits in the input buffer.
+    uint32_t m_nextCode;   ///< Next code value (to be written into the table)
+    uint32_t m_nextBits;   ///< Number of bits of the next code
+    uint32_t m_early;   ///< Early (see PDF 1.7 Specification, this constant is 0 or 1, based on the dictionary value)
+    uint32_t m_inputBuffer;   ///< Input buffer, containing bits, which were read from the input byte array
+    uint32_t m_inputBits;   ///< Number of bits in the input buffer.
     std::array<char, TABLE_SIZE>::iterator m_currentSequenceEnd;
-    bool m_first;               ///< Are we reading from stream for first time after the reset
-    char m_newCharacter;        ///< New character to be written
-    int m_position;             ///< Position in the input array
+    bool m_first;   ///< Are we reading from stream for first time after the reset
+    char m_newCharacter;   ///< New character to be written
+    int m_position;   ///< Position in the input array
     const QByteArray& m_inputByteArray;
     PDFProcessingBudget* m_budget;
 };
@@ -571,11 +571,11 @@ QByteArray PDFFlateDecodeFilter::compress(const QByteArray& decompressedData)
 {
     QByteArray result;
 
-    z_stream stream = { };
+    z_stream stream = {};
     stream.next_in = const_cast<Bytef*>(convertByteArrayToUcharPtr(decompressedData));
     stream.avail_in = decompressedData.size();
 
-    std::array<Bytef, 1024> outputBuffer = { };
+    std::array<Bytef, 1024> outputBuffer = {};
 
     int error = deflateInit(&stream, Z_BEST_COMPRESSION);
     if (error != Z_OK)
@@ -605,7 +605,7 @@ QByteArray PDFFlateDecodeFilter::compress(const QByteArray& decompressedData)
     switch (error)
     {
         case Z_STREAM_END:
-            break; // No error, normal behaviour
+            break;   // No error, normal behaviour
 
         default:
         {
@@ -634,11 +634,16 @@ PDFInteger PDFFlateDecodeFilter::getStreamDataLength(const QByteArray& data, PDF
         return -1;
     }
 
-    z_stream stream = { };
+    z_stream stream = {};
     stream.next_in = const_cast<Bytef*>(convertByteArrayToUcharPtr(data) + offset);
     stream.avail_in = data.size() - offset;
 
-    std::array<Bytef, 1024> outputBuffer = { };
+    std::array<Bytef, 1024> outputBuffer = {};
+
+    // The probe only recovers a length, so it must not be able to inflate further
+    // than the decode path would allow: the same ceiling (STREAM_FILTER_MAX_* via
+    // maxAllowedDecompressedSize), applied to the bytes that are actually left.
+    const int64_t maximalProbeLength = maxAllowedDecompressedSize(data.size() - offset);
 
     int error = inflateInit(&stream);
     if (error != Z_OK)
@@ -652,6 +657,12 @@ PDFInteger PDFFlateDecodeFilter::getStreamDataLength(const QByteArray& data, PDF
         stream.avail_out = static_cast<uInt>(outputBuffer.size());
 
         error = inflate(&stream, Z_NO_FLUSH);
+
+        if (static_cast<int64_t>(stream.total_out) > maximalProbeLength)
+        {
+            inflateEnd(&stream);
+            return -1;
+        }
     } while (error == Z_OK);
 
     PDFInteger dataLength = stream.total_in;
@@ -669,11 +680,11 @@ QByteArray PDFFlateDecodeFilter::uncompress(const QByteArray& data, PDFProcessin
 {
     QByteArray result;
 
-    z_stream stream = { };
+    z_stream stream = {};
     stream.next_in = const_cast<Bytef*>(convertByteArrayToUcharPtr(data));
     stream.avail_in = data.size();
 
-    std::array<Bytef, 1024> outputBuffer = { };
+    std::array<Bytef, 1024> outputBuffer = {};
 
     int error = inflateInit(&stream);
     if (error != Z_OK)
@@ -707,7 +718,7 @@ QByteArray PDFFlateDecodeFilter::uncompress(const QByteArray& data, PDFProcessin
     switch (error)
     {
         case Z_STREAM_END:
-            break; // No error, normal behaviour
+            break;   // No error, normal behaviour
 
         default:
         {
@@ -968,14 +979,16 @@ QByteArray PDFStreamFilterStorage::getDecodedStream(const PDFStream* stream,
 
 QByteArray PDFStreamFilterStorage::getDecodedStream(const PDFStream* stream, const PDFSecurityHandler* securityHandler)
 {
-    return getDecodedStream(stream, [](const PDFObject& object) -> const PDFObject& { return object; }, securityHandler, nullptr);
+    return getDecodedStream(stream, [](const PDFObject& object) -> const PDFObject&
+                            { return object; }, securityHandler, nullptr);
 }
 
 QByteArray PDFStreamFilterStorage::getDecodedStream(const PDFStream* stream,
                                                     const PDFSecurityHandler* securityHandler,
                                                     PDFProcessingBudget* budget)
 {
-    return getDecodedStream(stream, [](const PDFObject& object) -> const PDFObject& { return object; }, securityHandler, budget);
+    return getDecodedStream(stream, [](const PDFObject& object) -> const PDFObject&
+                            { return object; }, securityHandler, budget);
 }
 
 PDFInteger PDFStreamFilterStorage::getStreamDataLength(const QByteArray& data, const QByteArray& filterName, PDFInteger offset)

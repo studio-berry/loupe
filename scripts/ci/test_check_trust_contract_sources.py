@@ -6,15 +6,16 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from check_trust_contract_sources import OVERLAY_FINDINGS_GUARD, relative
+from check_trust_contract_sources import REQUIRED_MARKERS, relative
+
+
+CONTROLLER = "LoopLibInteraction/sources/preflightcontroller.cpp"
 
 
 class TrustContractSourceTest(unittest.TestCase):
-    def test_overlay_guard_is_the_only_findings_empty_exception(self) -> None:
-        self.assertEqual(
-            OVERLAY_FINDINGS_GUARD,
-            "LoopLibInteraction/sources/preflightcontroller.cpp",
-        )
+    def test_controller_is_a_required_reducer_surface_not_an_exception(self) -> None:
+        self.assertIn(CONTROLLER, REQUIRED_MARKERS)
+        self.assertIn("reducePreflightVerdict", REQUIRED_MARKERS[CONTROLLER])
 
     def test_relative_paths_are_posix_paths(self) -> None:
         self.assertEqual(

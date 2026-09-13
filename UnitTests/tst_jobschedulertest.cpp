@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <thread>
 
 class JobSchedulerTest : public QObject
@@ -46,6 +47,8 @@ private slots:
     void progressAndOperationMetadataAreObservable();
     void waitTimeoutCancelJoinsBeforeTerminalSnapshot();
     void cancelledPreflightAndExportJobsAreNotSuccess();
+    void test_finishedJobReleasesItsWorkClosure();
+    void test_terminalJobRetentionIsBounded();
 };
 
 void JobSchedulerTest::priorityOrdersQueuedJobs()
@@ -238,6 +241,11 @@ void JobSchedulerTest::cancellationIsTerminalAndMeasured()
     const QList<pdf::PDFJobTraceEvent> events = scheduler.trace(jobId);
     QVERIFY(std::any_of(events.cbegin(), events.cend(), [](const pdf::PDFJobTraceEvent& event)
                         { return event.status == pdf::PDFJobStatus::Cancelled; }));
+
+    // issue #144 AC7: traces identify the async job by type.
+    QVERIFY(!events.isEmpty());
+    QVERIFY(std::all_of(events.cbegin(), events.cend(), [](const pdf::PDFJobTraceEvent& event)
+                        { return event.kind == pdf::PDFJobKind::Preflight; }));
 }
 
 void JobSchedulerTest::staleRevisionIsDiscardedBeforeWorkRuns()
@@ -354,6 +362,55 @@ void JobSchedulerTest::cancelledPreflightAndExportJobsAreNotSuccess()
     QVERIFY(scheduler.cancel(preflightId));
     QVERIFY(scheduler.waitForFinished(preflightId, 1000));
     QCOMPARE(scheduler.snapshot(preflightId).status, pdf::PDFJobStatus::Cancelled);
+}
+
+void JobSchedulerTest::test_finishedJobReleasesItsWorkClosure()
+{
+    pdf::PDFJobScheduler scheduler(1);
+
+    pdf::PDFJobSpec spec;
+    spec.kind = pdf::PDFJobKind::Preflight;
+    spec.priority = pdf::PDFJobPriority::Operator;
+    spec.documentKey = QStringLiteral("doc-1");
+    spec.documentRevision = QStringLiteral("1");
+
+    auto payload = std::make_shared<int>(0);
+    std::weak_ptr<int> watcher = payload;
+
+    const QString jobId = scheduler.submit(spec, [payload](pdf::PDFJobContext& context)
+                                           { *payload = context.isCancellationRequested() ? -1 : 1; });
+    payload.reset();
+
+    QVERIFY(scheduler.waitForFinished(jobId, 5000));
+    QCOMPARE(scheduler.snapshot(jobId).status, pdf::PDFJobStatus::Succeeded);
+
+    // The scheduler must not keep the closure - and therefore everything the
+    // closure captured (the preflight job in the Editor captures the document and
+    // the result object) - alive for the lifetime of the process.
+    QTRY_VERIFY_WITH_TIMEOUT(watcher.expired(), 5000);
+}
+
+void JobSchedulerTest::test_terminalJobRetentionIsBounded()
+{
+    pdf::PDFJobScheduler scheduler(1);
+
+    QList<QString> jobIds;
+    for (int index = 0; index < 300; ++index)
+    {
+        pdf::PDFJobSpec spec;
+        spec.kind = pdf::PDFJobKind::Other;
+        spec.priority = pdf::PDFJobPriority::Background;
+        spec.documentKey = QStringLiteral("doc-1");
+        spec.documentRevision = QStringLiteral("1");
+        jobIds.append(scheduler.submit(spec, [](pdf::PDFJobContext&) {}));
+        QVERIFY(scheduler.waitForFinished(jobIds.constLast(), 5000));
+    }
+
+    // Oldest terminal jobs are evicted; the most recent ones are still queryable.
+    QVERIFY2(scheduler.snapshot(jobIds.constFirst()).jobId.isEmpty(),
+             "a long-lived session must not retain every finished job forever");
+    QCOMPARE(scheduler.snapshot(jobIds.constLast()).status, pdf::PDFJobStatus::Succeeded);
+    QVERIFY(scheduler.trace(jobIds.constLast()).size() <= pdf::PDFJobScheduler::MAXIMUM_RETAINED_TRACE_EVENTS_PER_JOB);
 }
 
 QTEST_MAIN(JobSchedulerTest)

@@ -48,11 +48,15 @@ public:
     PDFLogScrubber() = delete;
 
     /// Scrubs \p text of the home and temp directories, the login name, the
-    /// machine host name, any remaining absolute path (Windows, UNC, or POSIX),
-    /// email addresses, and IPv4/IPv6 literals. Order matters: the home/temp
-    /// directory and login name/host name passes run first so a leftover
-    /// absolute path outside those roots is still caught by the generic path
-    /// pass. Applying scrub() to already-scrubbed text is a no-op.
+    /// machine host name, credential material (URL userinfo such as a Sentry
+    /// DSN, HTTP authorization values, and secret-named key/value pairs), any
+    /// remaining absolute path (Windows, UNC, or POSIX), email addresses, and
+    /// IPv4/IPv6 literals. Order matters: the home/temp directory and login
+    /// name/host name passes run first so a leftover absolute path outside
+    /// those roots is still caught by the generic path pass, and the credential
+    /// pass runs before the email/path passes so a DSN is reported as a leaked
+    /// secret (`<CREDENTIAL>`) rather than as user data (`<EMAIL>`). Applying
+    /// scrub() to already-scrubbed text is a no-op.
     /// \param text Text to scrub
     static QString scrub(const QString& text);
 };

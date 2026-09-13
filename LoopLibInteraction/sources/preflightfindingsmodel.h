@@ -52,6 +52,9 @@ struct PreflightFindingView
     QRectF bbox;
     QStringList evidenceIds;
     bool selected = false;
+    /// True when an active operator disposition covers this finding, so it no
+    /// longer counts as blocking in the document's verdict.
+    bool waived = false;
 };
 
 struct FindingOverlay
@@ -83,7 +86,8 @@ public:
         CheckIdRole,
         BoundingBoxRole,
         EvidenceIdsRole,
-        SelectedRole
+        SelectedRole,
+        WaivedRole
     };
     Q_ENUM(Role)
 
@@ -97,6 +101,16 @@ public:
                  QString documentRevision,
                  const QList<pdf::PreflightFinding>& errors,
                  const QList<pdf::PreflightFinding>& warnings);
+
+    /// As above, and marks the findings named by \p waivedFindingIds as covered
+    /// by an active disposition. An overload rather than a defaulted parameter:
+    /// a default argument changes the exported symbol and this library's
+    /// callers link against it directly.
+    void replace(QString documentKey,
+                 QString documentRevision,
+                 const QList<pdf::PreflightFinding>& errors,
+                 const QList<pdf::PreflightFinding>& warnings,
+                 const QStringList& waivedFindingIds);
     void clear();
     void setSelectedFinding(const QString& findingId);
 
@@ -122,7 +136,8 @@ signals:
 private:
     static PreflightFindingView makeView(const QString& documentKey,
                                          const QString& documentRevision,
-                                         const pdf::PreflightFinding& finding);
+                                         const pdf::PreflightFinding& finding,
+                                         bool waived);
 
     QVector<PreflightFindingView> m_findings;
     QString m_documentKey;

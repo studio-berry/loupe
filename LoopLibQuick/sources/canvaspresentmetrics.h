@@ -34,6 +34,7 @@
 #include <QPointer>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 
 QT_BEGIN_NAMESPACE
@@ -83,6 +84,8 @@ class LOOPLIBQUICK_EXPORT CanvasPresentMetrics final : public QObject
     Q_OBJECT
 
 public:
+    using AsyncWorkKindsProvider = std::function<QStringList()>;
+
     explicit CanvasPresentMetrics(QObject* parent = nullptr);
     ~CanvasPresentMetrics() override;
 
@@ -95,6 +98,9 @@ public:
     /// that is always on is a tax on every frame.
     void setRecorder(pdfinteraction::InteractionTraceRecorder* recorder);
     pdfinteraction::InteractionTraceRecorder* recorder() const noexcept { return m_recorder; }
+
+    /// Supplies privacy-safe service names for work active at frame close.
+    void setAsyncWorkKindsProvider(AsyncWorkKindsProvider provider);
 
     /// The clock the render-thread stamps are taken against. Must outlive this
     /// object and must be safe to read from the render thread.
@@ -160,6 +166,7 @@ private:
 
     QPointer<QQuickWindow> m_window;
     pdfinteraction::InteractionTraceRecorder* m_recorder = nullptr;
+    AsyncWorkKindsProvider m_asyncWorkKindsProvider;
     const pdfinteraction::IMonotonicClock* m_clock = nullptr;
 
     SteadyMonotonicClock m_defaultClock;

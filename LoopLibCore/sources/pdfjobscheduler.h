@@ -154,6 +154,7 @@ struct LOOPLIBCORESHARED_EXPORT PDFJobSnapshot
 struct LOOPLIBCORESHARED_EXPORT PDFJobTraceEvent
 {
     QString jobId;
+    PDFJobKind kind = PDFJobKind::Other;
     PDFJobStatus status = PDFJobStatus::Queued;
     PDFJobPriority priority = PDFJobPriority::Background;
     int queueDepth = 0;
@@ -213,12 +214,24 @@ public:
     PDFJobSnapshot snapshot(const QString& jobId) const;
     QList<PDFJobSnapshot> queuedJobs() const;
     QList<PDFJobSnapshot> runningJobs() const;
+
+    /// Returns the recorded trace events, most recent last. A job's trace is
+    /// bounded to its most recent MAXIMUM_RETAINED_TRACE_EVENTS_PER_JOB events.
     QList<PDFJobTraceEvent> trace(const QString& jobId = {}) const;
 
     void setCurrentRevision(QString documentKey, QString documentRevision);
     void clearCurrentRevision(const QString& documentKey);
 
     int workerCount() const noexcept { return m_workerCount; }
+
+    /// Terminal jobs stay queryable through snapshot()/trace() after they finish,
+    /// but both stores are bounded: a long-lived session must not accumulate one
+    /// JobEntry (and one trace list) per job for the process lifetime. The work
+    /// closure itself is released as soon as the job reaches a terminal state, so
+    /// anything it captured - the document of an Editor preflight job, for
+    /// instance - is not pinned by the scheduler.
+    static constexpr int MAXIMUM_RETAINED_TERMINAL_JOBS = 256;
+    static constexpr int MAXIMUM_RETAINED_TRACE_EVENTS_PER_JOB = 32;
 
 signals:
     void jobQueued(pdf::PDFJobSnapshot snapshot);

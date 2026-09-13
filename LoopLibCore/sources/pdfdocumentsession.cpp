@@ -735,7 +735,7 @@ void PDFDocumentSession::initializeRendering()
     m_optionalContentActivity = std::make_unique<PDFOptionalContentActivity>(m_document, OCUsage::Export, nullptr);
 
     m_cmsManager = std::make_unique<PDFCMSManager>(nullptr);
-    m_cmsManager->setDocument(m_document);
+    m_cmsManager->setDocument(m_document, m_processingBudget.get());
     m_cms = m_cmsManager->getCurrentCMS();
 
     m_fontCache = std::make_unique<PDFFontCache>(DEFAULT_FONT_CACHE_LIMIT, DEFAULT_REALIZED_FONT_CACHE_LIMIT);

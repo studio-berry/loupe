@@ -39,13 +39,19 @@
 namespace pdf
 {
 
+// PDFSampledFunction materialises a 2^m hypercube offset table in its constructor
+// and a 2^m sample buffer on every apply() call. The specification permits up to 32
+// input variables, but 2^32 four-byte offsets is a denial of service, and a real
+// sampled function uses a handful of dimensions at most. This ceiling also makes the
+// dimension count safe to shift and to index m_size with.
+constexpr uint32_t SAMPLED_FUNCTION_MAXIMUM_DIMENSIONS = 20;
+
 PDFFunction::PDFFunction(uint32_t m, uint32_t n, std::vector<PDFReal>&& domain, std::vector<PDFReal>&& range) :
     m_m(m),
     m_n(n),
     m_domain(std::move(domain)),
     m_range(std::move(range))
 {
-
 }
 
 PDFFunctionPtr PDFFunction::createFunction(const PDFDocument* document, const PDFObject& object)
@@ -108,7 +114,8 @@ PDFFunctionPtr PDFFunction::createFunctionImpl(const PDFDocument* document, cons
             std::vector<PDFReal> encode = loader.readNumberArrayFromDictionary(dictionary, "Encode");
             std::vector<PDFReal> decode = loader.readNumberArrayFromDictionary(dictionary, "Decode");
 
-            if (size.empty() || !std::all_of(size.cbegin(), size.cend(), [](PDFInteger size) { return size >= 1; }))
+            if (size.empty() || !std::all_of(size.cbegin(), size.cend(), [](PDFInteger size)
+                                             { return size >= 1; }))
             {
                 throw PDFException(PDFParsingContext::tr("Sampled function has invalid sample size."));
             }
@@ -116,6 +123,11 @@ PDFFunctionPtr PDFFunction::createFunctionImpl(const PDFDocument* document, cons
             if (bitsPerSample < 1 || bitsPerSample > 32)
             {
                 throw PDFException(PDFParsingContext::tr("Sampled function has invalid count of bits per sample."));
+            }
+
+            if (size.size() > SAMPLED_FUNCTION_MAXIMUM_DIMENSIONS)
+            {
+                throw PDFException(PDFParsingContext::tr("Sampled function has invalid sample size."));
             }
 
             if (encode.empty())
@@ -142,7 +154,12 @@ PDFFunctionPtr PDFFunction::createFunctionImpl(const PDFDocument* document, cons
                 throw PDFException(PDFParsingContext::tr("Sampled function hasn't any output."));
             }
 
-            if (domain.size() != encode.size())
+            // The PDF 1.7 specification defines Encode as 2 x m numbers and Decode
+            // as 2 x n numbers, and PDFSampledFunction indexes m_domain/m_encoder as
+            // 2 x m and m_range/m_decoder as 2 x n. Comparing Domain.size() with
+            // Encode.size() alone accepted arrays shorter than 2 x m, which the
+            // constructor only rejects with Q_ASSERT - i.e. not in a release build.
+            if (domain.size() != 2 * m || encode.size() != 2 * m)
             {
                 throw PDFException(PDFParsingContext::tr("Sampled function has invalid encode array."));
             }
@@ -168,6 +185,20 @@ PDFFunctionPtr PDFFunction::createFunctionImpl(const PDFDocument* document, cons
             {
                 throw PDFException(PDFParsingContext::tr("Sampled function has invalid sample size."));
             }
+
+            // The stream is the only source of samples, and each one costs
+            // `bitsPerSample` bits of it, so a declared count larger than the
+            // stream can carry must fail here - before resize() reserves memory
+            // proportional to a hostile number. This accepts exactly the documents
+            // the read loop below would have accepted (it throws "Not enough
+            // samples" at the same bit count); it only fails earlier.
+            const uint64_t availableSampleBits = static_cast<uint64_t>(streamData.size()) * 8;
+            const uint64_t requiredSampleBits = static_cast<uint64_t>(sampleCount) * static_cast<uint64_t>(bitsPerSample);
+            if (requiredSampleBits > availableSampleBits)
+            {
+                throw PDFException(PDFParsingContext::tr("Sampled function declares more samples than its stream contains (%1 samples need %2 bits, the stream has %3).").arg(sampleCount).arg(requiredSampleBits).arg(availableSampleBits));
+            }
+
             std::vector<PDFReal> samples;
             samples.resize(sampleCount, 0.0);
 
@@ -201,12 +232,8 @@ PDFFunctionPtr PDFFunction::createFunctionImpl(const PDFDocument* document, cons
             }
 
             std::vector<uint32_t> sizeAsUint;
-            std::transform(size.cbegin(), size.cend(), std::back_inserter(sizeAsUint), [](PDFInteger integer) { return static_cast<uint32_t>(integer); });
-
-            if (m > 30)
-            {
-                throw PDFException(PDFParsingContext::tr("Sampled function has invalid sample size."));
-            }
+            std::transform(size.cbegin(), size.cend(), std::back_inserter(sizeAsUint), [](PDFInteger integer)
+                           { return static_cast<uint32_t>(integer); });
 
             return std::make_shared<PDFSampledFunction>(static_cast<uint32_t>(m), static_cast<uint32_t>(n), std::move(domain), std::move(range), std::move(sizeAsUint), std::move(samples), std::move(encode), std::move(decode), sampleMaxValue, loader.readIntegerFromDictionary(dictionary, "Order", 1));
         }
@@ -599,7 +626,6 @@ PDFStitchingFunction::PDFStitchingFunction(uint32_t m, uint32_t n,
 
 PDFStitchingFunction::~PDFStitchingFunction()
 {
-
 }
 
 PDFFunction::FunctionResult PDFStitchingFunction::apply(const_iterator x_1,
@@ -624,7 +650,8 @@ PDFFunction::FunctionResult PDFStitchingFunction::apply(const_iterator x_1,
 
     // First search for partial function, which defines our range. Use algorithm
     // similar to the std::lower_bound.
-    auto it = std::lower_bound(m_partialFunctions.cbegin(), m_partialFunctions.cend(), x, [](const auto& partialFunction, PDFReal value) { return partialFunction.bound1 < value; });
+    auto it = std::lower_bound(m_partialFunctions.cbegin(), m_partialFunctions.cend(), x, [](const auto& partialFunction, PDFReal value)
+                               { return partialFunction.bound1 < value; });
     if (it == m_partialFunctions.cend())
     {
         --it;
@@ -650,7 +677,6 @@ PDFFunction::FunctionResult PDFStitchingFunction::apply(const_iterator x_1,
 PDFIdentityFunction::PDFIdentityFunction() :
     PDFFunction(0, 0, std::vector<PDFReal>(), std::vector<PDFReal>())
 {
-
 }
 
 PDFFunction::FunctionResult PDFIdentityFunction::apply(const_iterator x_1,
@@ -678,10 +704,26 @@ public:
     using OperandObject = PDFPostScriptFunction::OperandObject;
     using InstructionPointer = PDFPostScriptFunction::InstructionPointer;
 
-    inline void pushReal(PDFReal value) { m_stack.push_back(OperandObject::createReal(value)); checkOverflow(); }
-    inline void pushInteger(PDFInteger value) { m_stack.push_back(OperandObject::createInteger(value)); checkOverflow(); }
-    inline void pushBoolean(bool value) { m_stack.push_back(OperandObject::createBoolean(value)); checkOverflow(); }
-    inline void pushInstructionPointer(InstructionPointer value) { m_stack.push_back(OperandObject::createInstructionPointer(value)); checkOverflow(); }
+    inline void pushReal(PDFReal value)
+    {
+        m_stack.push_back(OperandObject::createReal(value));
+        checkOverflow();
+    }
+    inline void pushInteger(PDFInteger value)
+    {
+        m_stack.push_back(OperandObject::createInteger(value));
+        checkOverflow();
+    }
+    inline void pushBoolean(bool value)
+    {
+        m_stack.push_back(OperandObject::createBoolean(value));
+        checkOverflow();
+    }
+    inline void pushInstructionPointer(InstructionPointer value)
+    {
+        m_stack.push_back(OperandObject::createInstructionPointer(value));
+        checkOverflow();
+    }
 
     /// Returns true, if integer operation should be performed instead of operation with real values.
     /// (two top elements are integer).
@@ -712,13 +754,25 @@ public:
     PDFReal popNumber();
 
     /// Returns true, if current value is real
-    bool isReal() const { checkUnderflow(); return m_stack.back().type == PDFPostScriptFunction::OperandType::Real; }
+    bool isReal() const
+    {
+        checkUnderflow();
+        return m_stack.back().type == PDFPostScriptFunction::OperandType::Real;
+    }
 
     /// Returns true, if current value is integer
-    bool isInteger() const { checkUnderflow(); return m_stack.back().type == PDFPostScriptFunction::OperandType::Integer; }
+    bool isInteger() const
+    {
+        checkUnderflow();
+        return m_stack.back().type == PDFPostScriptFunction::OperandType::Integer;
+    }
 
     /// Pops the current value
-    inline void pop() { checkUnderflow(); m_stack.pop_back(); }
+    inline void pop()
+    {
+        checkUnderflow();
+        m_stack.pop_back();
+    }
 
     /// Exchange the two top elements
     void exch();
@@ -740,7 +794,11 @@ public:
     void roll(PDFInteger n, PDFInteger j);
 
     /// Pushes the operand onto the stack
-    void push(const OperandObject& operand) { m_stack.push_back(operand); checkOverflow(); }
+    void push(const OperandObject& operand)
+    {
+        m_stack.push_back(operand);
+        checkOverflow();
+    }
 
     /// Returns true, if stack is empty
     bool empty() const { return m_stack.empty(); }
@@ -774,14 +832,13 @@ public:
         m_program(program),
         m_stack(stack)
     {
-
     }
 
     /// Executes the postscript program
     void execute();
 
 private:
-   template<template<typename> typename Comparator>
+    template <template <typename> typename Comparator>
     void executeRelationOperator()
     {
         if (m_stack.isBinaryOperationInteger())
@@ -808,7 +865,7 @@ void PDFPostScriptFunctionExecutor::execute()
 
     std::stack<InstructionPointer> callStack;
 
-    InstructionPointer ip = 0; // First instruction is at zero
+    InstructionPointer ip = 0;   // First instruction is at zero
     while (ip != PDFPostScriptFunction::INVALID_INSTRUCTION_POINTER)
     {
         if (ip >= m_program.size())
@@ -1401,7 +1458,7 @@ bool PDFPostScriptFunctionStack::isBinaryOperationInteger() const
 
     const size_t size = m_stack.size();
     return m_stack[size - 1].type == PDFPostScriptFunction::OperandType::Integer &&
-            m_stack[size - 2].type == PDFPostScriptFunction::OperandType::Integer;
+           m_stack[size - 2].type == PDFPostScriptFunction::OperandType::Integer;
 }
 
 bool PDFPostScriptFunctionStack::isBinaryOperationBoolean() const
@@ -1410,7 +1467,7 @@ bool PDFPostScriptFunctionStack::isBinaryOperationBoolean() const
 
     const size_t size = m_stack.size();
     return m_stack[size - 1].type == PDFPostScriptFunction::OperandType::Boolean &&
-            m_stack[size - 2].type == PDFPostScriptFunction::OperandType::Boolean;
+           m_stack[size - 2].type == PDFPostScriptFunction::OperandType::Boolean;
 }
 
 PDFReal PDFPostScriptFunctionStack::popReal()
@@ -1603,60 +1660,59 @@ void PDFPostScriptFunctionStack::checkUnderflow(size_t n) const
 
 PDFPostScriptFunction::Code PDFPostScriptFunction::getCode(const QByteArray& byteArray)
 {
-    static constexpr const std::pair<Code, const  char*> codes[] =
-    {
+    static constexpr const std::pair<Code, const char*> codes[] = {
         // B.1 Arithmetic operators
-        std::pair<Code, const  char*>{ Code::Add, "add" },
-        std::pair<Code, const  char*>{ Code::Sub, "sub" },
-        std::pair<Code, const  char*>{ Code::Mul, "mul" },
-        std::pair<Code, const  char*>{ Code::Div, "div" },
-        std::pair<Code, const  char*>{ Code::Idiv, "idiv" },
-        std::pair<Code, const  char*>{ Code::Mod, "mod" },
-        std::pair<Code, const  char*>{ Code::Neg, "neg" },
-        std::pair<Code, const  char*>{ Code::Abs, "abs" },
-        std::pair<Code, const  char*>{ Code::Ceiling, "ceiling" },
-        std::pair<Code, const  char*>{ Code::Floor, "floor" },
-        std::pair<Code, const  char*>{ Code::Round, "round" },
-        std::pair<Code, const  char*>{ Code::Truncate, "truncate" },
-        std::pair<Code, const  char*>{ Code::Sqrt, "sqrt" },
-        std::pair<Code, const  char*>{ Code::Sin, "sin" },
-        std::pair<Code, const  char*>{ Code::Cos, "cos" },
-        std::pair<Code, const  char*>{ Code::Atan, "atan" },
-        std::pair<Code, const  char*>{ Code::Exp, "exp" },
-        std::pair<Code, const  char*>{ Code::Ln, "ln" },
-        std::pair<Code, const  char*>{ Code::Log, "log" },
-        std::pair<Code, const  char*>{ Code::Cvi, "cvi" },
-        std::pair<Code, const  char*>{ Code::Cvr, "cvr" },
+        std::pair<Code, const char*>{ Code::Add, "add" },
+        std::pair<Code, const char*>{ Code::Sub, "sub" },
+        std::pair<Code, const char*>{ Code::Mul, "mul" },
+        std::pair<Code, const char*>{ Code::Div, "div" },
+        std::pair<Code, const char*>{ Code::Idiv, "idiv" },
+        std::pair<Code, const char*>{ Code::Mod, "mod" },
+        std::pair<Code, const char*>{ Code::Neg, "neg" },
+        std::pair<Code, const char*>{ Code::Abs, "abs" },
+        std::pair<Code, const char*>{ Code::Ceiling, "ceiling" },
+        std::pair<Code, const char*>{ Code::Floor, "floor" },
+        std::pair<Code, const char*>{ Code::Round, "round" },
+        std::pair<Code, const char*>{ Code::Truncate, "truncate" },
+        std::pair<Code, const char*>{ Code::Sqrt, "sqrt" },
+        std::pair<Code, const char*>{ Code::Sin, "sin" },
+        std::pair<Code, const char*>{ Code::Cos, "cos" },
+        std::pair<Code, const char*>{ Code::Atan, "atan" },
+        std::pair<Code, const char*>{ Code::Exp, "exp" },
+        std::pair<Code, const char*>{ Code::Ln, "ln" },
+        std::pair<Code, const char*>{ Code::Log, "log" },
+        std::pair<Code, const char*>{ Code::Cvi, "cvi" },
+        std::pair<Code, const char*>{ Code::Cvr, "cvr" },
 
         // B.2 Relational, Boolean and Bitwise operators
-        std::pair<Code, const  char*>{ Code::Eq, "eq" },
-        std::pair<Code, const  char*>{ Code::Ne, "ne" },
-        std::pair<Code, const  char*>{ Code::Gt, "gt" },
-        std::pair<Code, const  char*>{ Code::Ge, "ge" },
-        std::pair<Code, const  char*>{ Code::Lt, "lt" },
-        std::pair<Code, const  char*>{ Code::Le, "le" },
-        std::pair<Code, const  char*>{ Code::And, "and" },
-        std::pair<Code, const  char*>{ Code::Or, "or" },
-        std::pair<Code, const  char*>{ Code::Xor, "xor" },
-        std::pair<Code, const  char*>{ Code::Not, "not" },
-        std::pair<Code, const  char*>{ Code::Bitshift, "bitshift" },
-        std::pair<Code, const  char*>{ Code::True, "true" },
-        std::pair<Code, const  char*>{ Code::False, "false" },
+        std::pair<Code, const char*>{ Code::Eq, "eq" },
+        std::pair<Code, const char*>{ Code::Ne, "ne" },
+        std::pair<Code, const char*>{ Code::Gt, "gt" },
+        std::pair<Code, const char*>{ Code::Ge, "ge" },
+        std::pair<Code, const char*>{ Code::Lt, "lt" },
+        std::pair<Code, const char*>{ Code::Le, "le" },
+        std::pair<Code, const char*>{ Code::And, "and" },
+        std::pair<Code, const char*>{ Code::Or, "or" },
+        std::pair<Code, const char*>{ Code::Xor, "xor" },
+        std::pair<Code, const char*>{ Code::Not, "not" },
+        std::pair<Code, const char*>{ Code::Bitshift, "bitshift" },
+        std::pair<Code, const char*>{ Code::True, "true" },
+        std::pair<Code, const char*>{ Code::False, "false" },
 
         // B.3 Conditional operators
-        std::pair<Code, const  char*>{ Code::If, "if" },
-        std::pair<Code, const  char*>{ Code::IfElse, "ifelse" },
+        std::pair<Code, const char*>{ Code::If, "if" },
+        std::pair<Code, const char*>{ Code::IfElse, "ifelse" },
 
         // B.4 Stack operators
-        std::pair<Code, const  char*>{ Code::Pop, "pop" },
-        std::pair<Code, const  char*>{ Code::Exch, "exch" },
-        std::pair<Code, const  char*>{ Code::Dup, "dup" },
-        std::pair<Code, const  char*>{ Code::Copy, "copy" },
-        std::pair<Code, const  char*>{ Code::Index, "index" },
-        std::pair<Code, const  char*>{ Code::Roll, "roll" }
+        std::pair<Code, const char*>{ Code::Pop, "pop" },
+        std::pair<Code, const char*>{ Code::Exch, "exch" },
+        std::pair<Code, const char*>{ Code::Dup, "dup" },
+        std::pair<Code, const char*>{ Code::Copy, "copy" },
+        std::pair<Code, const char*>{ Code::Index, "index" },
+        std::pair<Code, const char*>{ Code::Roll, "roll" }
     };
 
-    for (const std::pair<Code, const  char*>& codeItem : codes)
+    for (const std::pair<Code, const char*>& codeItem : codes)
     {
         if (byteArray == codeItem.second)
         {
@@ -1676,7 +1732,6 @@ PDFPostScriptFunction::PDFPostScriptFunction(uint32_t m, uint32_t n, std::vector
 
 PDFPostScriptFunction::~PDFPostScriptFunction()
 {
-
 }
 
 PDFPostScriptFunction::Program PDFPostScriptFunction::parseProgram(const QByteArray& byteArray)

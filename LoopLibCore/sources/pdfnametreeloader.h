@@ -27,12 +27,13 @@
 
 #include <map>
 #include <functional>
+#include <set>
 
 namespace pdf
 {
 
 /// This class can load a number tree into the array
-template<typename Type>
+template <typename Type>
 class PDFNameTreeLoader
 {
 public:
@@ -41,21 +42,58 @@ public:
     using MappedObjects = std::map<QByteArray, Type>;
     using LoadMethod = std::function<Type(const PDFObjectStorage*, const PDFObject&)>;
 
+    /// Longest accepted key in a name tree. Keys are attacker-controlled strings
+    /// that are stored verbatim in the document model (named destinations,
+    /// embedded-file names, multimedia assets), and nothing downstream bounds
+    /// them. A key past this length is not a name, it is a payload.
+    static constexpr int MAXIMUM_NAME_LENGTH = 4096;
+
+    /// Largest accepted number of entries across the whole tree. Bounds the
+    /// "many small names" shape that the per-name cap alone does not.
+    static constexpr size_t MAXIMUM_ENTRY_COUNT = 65536;
+
+    /// Deepest accepted Kids nesting. Together with the visited-node set below
+    /// this keeps a malformed tree from recursing without bound.
+    static constexpr int MAXIMUM_TREE_DEPTH = 64;
+
     /// Parses the name tree and loads its items into the map. Some errors are ignored,
     /// e.g. when kid is null. Objects are retrieved by \p loadMethod.
+    ///
+    /// The tree is traversed defensively: a Kids chain that points back at a node
+    /// it already visited (directly or through a cycle) is not followed a second
+    /// time, nesting is bounded, and over-long or over-numerous keys are skipped.
+    /// A malformed name tree therefore costs a truncated map rather than
+    /// unbounded recursion or unbounded memory.
     /// \param storage Object storage
     /// \param root Root of the name tree
     /// \param loadMethod Parsing method, which retrieves parsed object
     static MappedObjects parse(const PDFObjectStorage* storage, const PDFObject& root, const LoadMethod& loadMethod)
     {
         MappedObjects result;
-        parseImpl(result, storage, root, loadMethod);
+        std::set<PDFObjectReference> visitedNodes;
+        parseImpl(result, storage, root, loadMethod, visitedNodes, 0);
         return result;
     }
 
 private:
-    static void parseImpl(MappedObjects& objects, const PDFObjectStorage* storage, const PDFObject& root, const LoadMethod& loadMethod)
+    static void parseImpl(MappedObjects& objects,
+                          const PDFObjectStorage* storage,
+                          const PDFObject& root,
+                          const LoadMethod& loadMethod,
+                          std::set<PDFObjectReference>& visitedNodes,
+                          int depth)
     {
+        if (depth > MAXIMUM_TREE_DEPTH)
+        {
+            return;
+        }
+
+        if (root.isReference() && !visitedNodes.insert(root.getReference()).second)
+        {
+            // Already expanded this node: the tree is cyclic.
+            return;
+        }
+
         if (const PDFDictionary* dictionary = storage->getDictionaryFromObject(root))
         {
             // Jakub Melka: First, load the objects into the map
@@ -75,19 +113,30 @@ private:
                         continue;
                     }
 
-                    objects[name.getString()] = loadMethod(storage, namedItemsArray->getItem(valueIndex));
+                    const QByteArray key = name.getString();
+                    if (key.size() > MAXIMUM_NAME_LENGTH)
+                    {
+                        continue;
+                    }
+
+                    if (objects.size() >= MAXIMUM_ENTRY_COUNT && !objects.count(key))
+                    {
+                        continue;
+                    }
+
+                    objects[key] = loadMethod(storage, namedItemsArray->getItem(valueIndex));
                 }
             }
 
             // Then, follow the kids
-            const PDFObject&  kids = storage->getObject(dictionary->get("Kids"));
+            const PDFObject& kids = storage->getObject(dictionary->get("Kids"));
             if (kids.isArray())
             {
                 const PDFArray* kidsArray = kids.getArray();
                 const size_t count = kidsArray->getCount();
                 for (size_t i = 0; i < count; ++i)
                 {
-                    parseImpl(objects, storage, kidsArray->getItem(i), loadMethod);
+                    parseImpl(objects, storage, kidsArray->getItem(i), loadMethod, visitedNodes, depth + 1);
                 }
             }
         }
@@ -96,4 +145,4 @@ private:
 
 }   // namespace pdf
 
-#endif // PDFNAMETREELOADER_H
+#endif   // PDFNAMETREELOADER_H

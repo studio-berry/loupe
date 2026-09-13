@@ -228,6 +228,44 @@ bool writeLargeFormatPdf(const QString& path, double widthInches, double heightI
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(pdf) == pdf.size();
 }
 
+// Fixtures for the sidecar-contract slots restored from the retired
+// UnitTests/tst_preflightplugintest.cpp (deleted in f7b89ac4). Bodies are
+// unchanged; only the fixtures those restored slots still use were carried over.
+QJsonObject documentScopeFinding()
+{
+    return QJsonObject{
+        { QStringLiteral("scope"), QStringLiteral("document") },
+        { QStringLiteral("type"), QStringLiteral("encrypted") },
+        { QStringLiteral("severity"), QStringLiteral("error") },
+        { QStringLiteral("message"), QStringLiteral("Document is password-protected and cannot be fully inspected") },
+        { QStringLiteral("check_id"), QStringLiteral("document-access") }
+    };
+}
+
+QJsonObject scopeFixtureReport(const QJsonObject& finding, bool pass)
+{
+    QJsonArray errors;
+    if (!pass)
+    {
+        errors.append(finding);
+    }
+
+    QJsonArray warnings;
+    if (pass)
+    {
+        warnings.append(finding);
+    }
+
+    return QJsonObject{
+        { QStringLiteral("schema_version"), 2 },
+        { QStringLiteral("pass"), pass },
+        { QStringLiteral("profile"), QStringLiteral("Loop Default") },
+        { QStringLiteral("errors"), errors },
+        { QStringLiteral("warnings"), warnings },
+        { QStringLiteral("fixups_available"), QJsonArray() }
+    };
+}
+
 }   // namespace
 
 class OperatorAcceptanceTest : public QObject
@@ -256,6 +294,18 @@ private slots:
     void reportContract_rejectsUnsupportedSchema();
     void reportContract_classifiesVisualOverlays();
     void reportContract_allowedPropertiesMatchSchema();
+
+    // Restored from the retired tst_preflightplugintest.cpp (f7b89ac4): helper
+    // contracts that are still live in production and had no coverage left.
+    void isNormalizedReport_requiresTheSidecarContract();
+    void isNormalizedReport_acceptsSchemaV3InspectionIncompletePass();
+    void isNormalizedReport_rejectsPassWhenInspectionIsIncomplete();
+    void isNormalizedReport_rejectsSchemaV3WithoutCanonicalVerdict();
+    void isNormalizedReport_rejectsInvalidScopeCombinations();
+    void isImplementedFixupId_advertisesImplementedFixups();
+    void shippedProfileFixups_areImplemented();
+    void overprintDisclosureText_alwaysShownEvenWithoutFinding();
+    void overprintDisclosureText_addsSpecificWarningForWhiteOverprintFinding();
 
     void sidecarCancellation_terminatesCleanly();
 
@@ -886,6 +936,169 @@ void OperatorAcceptanceTest::reportContract_classifiesVisualOverlays()
     QVERIFY(!fontFinding.isEmpty());
     QVERIFY(!pdfplugin::preflight::findingHasVisualOverlay(fontFinding, 2));
     QCOMPARE(fontFinding.value(QStringLiteral("scope")).toString(), QStringLiteral("object"));
+}
+
+// ---------------------------------------------------------------------------
+// Restored from UnitTests/tst_preflightplugintest.cpp, deleted in f7b89ac4.
+// That file was registered in no CMake target and could not compile (it included
+// the removed preflightreportmodel.h), so this coverage did not run at all. The
+// slots below exercise helpers that are still live - the fixup registry
+// (LoopLibCore/sources/pdffixupregistry.cpp), the preflight engine's advertised
+// fixups (preflightengine.cpp:6521) and the sidecar report contract in
+// UnitTests/support/preflight/preflightsidecarutils.h - so they are carried over
+// with their bodies unchanged.
+// ---------------------------------------------------------------------------
+
+void OperatorAcceptanceTest::isNormalizedReport_requiresTheSidecarContract()
+{
+    QJsonObject report;
+    report.insert(QStringLiteral("schema_version"), 1);
+    report.insert(QStringLiteral("pass"), true);
+    report.insert(QStringLiteral("profile"), QStringLiteral("Loop Default"));
+    report.insert(QStringLiteral("errors"), QJsonArray());
+    report.insert(QStringLiteral("warnings"), QJsonArray());
+    report.insert(QStringLiteral("fixups_available"), QJsonArray());
+
+    QVERIFY(pdfplugin::preflight::isNormalizedReport(report));
+    QVERIFY(!pdfplugin::preflight::isNormalizedReport(QJsonObject()));
+    report.insert(QStringLiteral("warnings"), QStringLiteral("not-an-array"));
+    QVERIFY(!pdfplugin::preflight::isNormalizedReport(report));
+}
+
+void OperatorAcceptanceTest::isNormalizedReport_acceptsSchemaV3InspectionIncompletePass()
+{
+    QJsonObject report;
+    report.insert(QStringLiteral("schema_version"), 3);
+    report.insert(QStringLiteral("inspection_complete"), false);
+    report.insert(QStringLiteral("pass"), false);
+    report.insert(QStringLiteral("profile"), QStringLiteral("Loop Default"));
+    report.insert(QStringLiteral("errors"), QJsonArray());
+    report.insert(QStringLiteral("warnings"), QJsonArray());
+    report.insert(QStringLiteral("fixups_available"), QJsonArray());
+    report.insert(QStringLiteral("checks"), QJsonArray());
+    report.insert(QStringLiteral("verdict"), QJsonObject{
+                                                 { QStringLiteral("state"), QStringLiteral("incomplete") },
+                                                 { QStringLiteral("reason_code"), QStringLiteral("inspection-incomplete") },
+                                                 { QStringLiteral("reason"), QStringLiteral("Required inspection evidence was not collected.") },
+                                                 { QStringLiteral("blocking_finding_ids"), QJsonArray() },
+                                                 { QStringLiteral("waived_finding_ids"), QJsonArray() } });
+
+    QVERIFY(pdfplugin::preflight::isNormalizedReport(report));
+}
+
+void OperatorAcceptanceTest::isNormalizedReport_rejectsPassWhenInspectionIsIncomplete()
+{
+    // #195's central rule: a report whose inspection is incomplete must never present PASS. The
+    // schema-v3 validator enforces it structurally by deriving `pass` from verdict.state
+    // (UnitTests/support/preflight/preflightsidecarutils.h), so inspection_complete:false with
+    // pass:true is rejected even though every other field is a well-formed schema-v3 report.
+    //
+    // This is the case the restored isNormalizedReport_* slots did not pin: all four used
+    // pass:false (or a v2 report, where the consistency check does not exist), which is why the
+    // review could call them "the schema-level twin of #195's central rule" for coverage that did
+    // not actually assert it. The report is the accept-case above with exactly one field flipped.
+    QJsonObject report;
+    report.insert(QStringLiteral("schema_version"), 3);
+    report.insert(QStringLiteral("inspection_complete"), false);
+    report.insert(QStringLiteral("pass"), true);
+    report.insert(QStringLiteral("profile"), QStringLiteral("Loop Default"));
+    report.insert(QStringLiteral("errors"), QJsonArray());
+    report.insert(QStringLiteral("warnings"), QJsonArray());
+    report.insert(QStringLiteral("fixups_available"), QJsonArray());
+    report.insert(QStringLiteral("checks"), QJsonArray());
+    report.insert(QStringLiteral("verdict"), QJsonObject{
+                                                 { QStringLiteral("state"), QStringLiteral("incomplete") },
+                                                 { QStringLiteral("reason_code"), QStringLiteral("inspection-incomplete") },
+                                                 { QStringLiteral("reason"), QStringLiteral("Required inspection evidence was not collected.") },
+                                                 { QStringLiteral("blocking_finding_ids"), QJsonArray() },
+                                                 { QStringLiteral("waived_finding_ids"), QJsonArray() } });
+
+    QString errorMessage;
+    QVERIFY(!pdfplugin::preflight::validateNormalizedReport(report, &errorMessage));
+    QCOMPARE(errorMessage, QStringLiteral("pass must be derived from verdict.state."));
+}
+
+void OperatorAcceptanceTest::isNormalizedReport_rejectsSchemaV3WithoutCanonicalVerdict()
+{
+    QJsonObject report;
+    report.insert(QStringLiteral("schema_version"), 3);
+    report.insert(QStringLiteral("inspection_complete"), true);
+    report.insert(QStringLiteral("pass"), true);
+    report.insert(QStringLiteral("profile"), QStringLiteral("Loop Default"));
+    report.insert(QStringLiteral("errors"), QJsonArray());
+    report.insert(QStringLiteral("warnings"), QJsonArray());
+    report.insert(QStringLiteral("fixups_available"), QJsonArray());
+    report.insert(QStringLiteral("checks"), QJsonArray());
+
+    QString errorMessage;
+    QVERIFY(!pdfplugin::preflight::validateNormalizedReport(report, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("verdict")));
+}
+
+void OperatorAcceptanceTest::isNormalizedReport_rejectsInvalidScopeCombinations()
+{
+    QJsonObject finding = documentScopeFinding();
+    finding.insert(QStringLiteral("page"), 1);
+    QJsonObject report = scopeFixtureReport(finding, false);
+
+    QVERIFY(!pdfplugin::preflight::isNormalizedReport(report));
+}
+
+void OperatorAcceptanceTest::isImplementedFixupId_advertisesImplementedFixups()
+{
+    QVERIFY(pdfplugin::preflight::isImplementedFixupId(QStringLiteral("add-bleed")));
+    QVERIFY(pdfplugin::preflight::isImplementedFixupId(QStringLiteral("rgb-to-cmyk")));
+    QVERIFY(pdfplugin::preflight::isImplementedFixupId(QStringLiteral("downsample-images")));
+}
+
+void OperatorAcceptanceTest::shippedProfileFixups_areImplemented()
+{
+    const QDir profiles(QStringLiteral(LOOP_PREFLIGHT_SOURCE_DIR "/profiles"));
+    const QFileInfoList profileFiles = profiles.entryInfoList({ QStringLiteral("*.json") },
+                                                              QDir::Files,
+                                                              QDir::Name);
+    QVERIFY2(!profileFiles.isEmpty(), qPrintable(profiles.absolutePath()));
+
+    for (const QFileInfo& profileInfo : profileFiles)
+    {
+        QFile profileFile(profileInfo.absoluteFilePath());
+        QVERIFY2(profileFile.open(QIODevice::ReadOnly), qPrintable(profileInfo.absoluteFilePath()));
+
+        QJsonParseError parseError;
+        const QJsonDocument profile = QJsonDocument::fromJson(profileFile.readAll(), &parseError);
+        QVERIFY2(parseError.error == QJsonParseError::NoError, qPrintable(parseError.errorString()));
+
+        const QJsonArray fixups = profile.object().value(QStringLiteral("fixups")).toArray();
+        QVERIFY2(!fixups.isEmpty(), qPrintable(profileInfo.absoluteFilePath()));
+        for (int index = 0; index < fixups.size(); ++index)
+        {
+            const QString id = fixups.at(index).toObject().value(QStringLiteral("id")).toString();
+            QVERIFY2(pdfplugin::preflight::isImplementedFixupId(id),
+                     qPrintable(QStringLiteral("%1: fixups[%2] = %3")
+                                    .arg(profileInfo.fileName())
+                                    .arg(index)
+                                    .arg(id)));
+        }
+    }
+}
+
+void OperatorAcceptanceTest::overprintDisclosureText_alwaysShownEvenWithoutFinding()
+{
+    // R-002/MIC-330: the preflight engine only flags the unsafe white/near-white
+    // overprint case. A document using ordinary (non-white) overprint produces no
+    // finding, so the general "page view doesn't simulate overprint" notice must
+    // appear regardless of whether hasWhiteOverprintFinding is set — otherwise an
+    // operator proofing such a document sees no warning at all.
+    const QString text = pdfplugin::preflight::overprintDisclosureText(false);
+    QVERIFY(text.contains(QStringLiteral("does not simulate overprint")));
+    QVERIFY(!text.contains(QStringLiteral("white or near-white")));
+}
+
+void OperatorAcceptanceTest::overprintDisclosureText_addsSpecificWarningForWhiteOverprintFinding()
+{
+    const QString text = pdfplugin::preflight::overprintDisclosureText(true);
+    QVERIFY(text.contains(QStringLiteral("does not simulate overprint")));
+    QVERIFY(text.contains(QStringLiteral("white or near-white")));
 }
 
 void OperatorAcceptanceTest::sidecarCancellation_terminatesCleanly()

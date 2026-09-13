@@ -24,6 +24,8 @@
 
 #include "pdfdocumentsession.h"
 #include "pdfoperationcontrol.h"
+#include "pdfpreflightverdict.h"
+#include "preflightprofileresolver.h"
 
 #include <memory>
 
@@ -76,6 +78,16 @@ PreflightFileInspectionOutcome inspectPreflightFile(const PreflightFileInspectio
 #endif
 
     return outcome;
+}
+
+void finalizePreflightResult(PreflightResult& result,
+                             const QByteArray& documentRevisionHash,
+                             const PreflightResolvedProfile& profile)
+{
+    result.profileResolution = profile.provenance();
+    result.documentRevisionDigest = QString::fromLatin1(documentRevisionHash.toHex());
+    result.effectiveProfileDigest = QString::fromLatin1(profile.effectiveHash);
+    result.pass = reducePreflightVerdict(result).isPass();
 }
 
 }   // namespace pdf

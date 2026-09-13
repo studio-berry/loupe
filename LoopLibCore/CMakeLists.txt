@@ -96,6 +96,8 @@ add_library(LoopLibCore SHARED
     sources/pdfprocessingbudget.h
     sources/pdfjobscheduler.cpp
     sources/pdfjobscheduler.h
+    sources/pdfblockingthreadguard.cpp
+    sources/pdfblockingthreadguard.h
     sources/pdfschemaversion.cpp
     sources/pdfschemaversion.h
     sources/pdfevidencegraph.cpp

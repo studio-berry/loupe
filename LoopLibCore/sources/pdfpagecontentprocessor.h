@@ -496,6 +496,13 @@ public:
     };
     Q_DECLARE_FLAGS(ProcedureSets, ProcedureSet)
 
+    /// Upper bound on the number of tiles a single tiling pattern paint may
+    /// produce. Real patterns produce a handful of tiles (a 1 pt step over a full
+    /// A4 page is ~500k); a hostile /XStep of ~0 asks for billions. Several
+    /// production render paths construct a PDFRenderer without a processing
+    /// budget, so this ceiling must not depend on one being present.
+    static constexpr PDFInteger MAXIMUM_TILING_PATTERN_TILES_PER_PAINT = 1 << 20;
+
     /// Process the contents of the page
     QList<PDFRenderError> processContents();
 
@@ -762,7 +769,8 @@ protected:
 
     /// Override this function to limit the complexity of the processed tiling
     /// patterns. If this function returns false, then the tiling pattern is not
-    /// painted at all. Default implementation processes all tiling patterns.
+    /// painted at all. The default implementation refuses tile counts above
+    /// MAXIMUM_TILING_PATTERN_TILES_PER_PAINT.
     /// \param tileCount Number of tiles, which must be painted
     virtual bool isTilingPatternProcessingAllowed(PDFInteger tileCount) const;
 

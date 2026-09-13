@@ -192,6 +192,51 @@ def validate_tokens(tokens: dict) -> None:
         raise ContractError("motion must define a zero-duration reduced-motion mode")
 
 
+def require_cpp_constexpr_int(source: str, name: str, expected: int, *, relative: str) -> None:
+    match = re.search(rf"inline constexpr int {re.escape(name)} = (\d+);", source)
+    if not match:
+        raise ContractError(f"{relative} is missing inline constexpr int {name}")
+    actual = int(match.group(1))
+    if actual != expected:
+        raise ContractError(f"{relative} {name} is {actual}, expected {expected} from docs/quick-design-tokens.json")
+
+
+def validate_cpp_tokens(root: Path, tokens: dict) -> None:
+    relative = "LoopLibQuick/sources/looptokens.h"
+    header = root / relative
+    try:
+        source = header.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContractError(f"cannot read {relative}: {exc}") from exc
+
+    spacing_values = tokens["spacing"]["values_px"]
+    named_spacing = {
+        "SpaceXs": 4,
+        "SpaceS": 8,
+        "SpaceM": 12,
+        "SpaceL": 16,
+        "SpaceXl": 24,
+        "SpaceXxl": 32,
+    }
+    for name, expected in named_spacing.items():
+        if expected not in spacing_values:
+            raise ContractError(f"docs/quick-design-tokens.json spacing.values_px is missing {expected}")
+        require_cpp_constexpr_int(source, name, expected, relative=relative)
+
+    typography = tokens["typography"]
+    require_cpp_constexpr_int(source, "TypeBodyPx", int(typography["body_px"]), relative=relative)
+    require_cpp_constexpr_int(source, "TypeSmallPx", int(typography["small_px"]), relative=relative)
+    require_cpp_constexpr_int(source, "TypeHeadingPx", int(typography["heading_px"]), relative=relative)
+
+    focus = tokens["focus"]
+    require_cpp_constexpr_int(source, "FocusOutlineWidthPx", int(focus["outline_width_px"]), relative=relative)
+    require_cpp_constexpr_int(source, "FocusOutlineOffsetPx", int(focus["outline_offset_px"]), relative=relative)
+
+    density = tokens["density"]
+    require_cpp_constexpr_int(source, "MinimumPointerTargetPx", int(density["minimum_pointer_target_px"]), relative=relative)
+    require_cpp_constexpr_int(source, "MinimumKeyboardTargetPx", int(density["minimum_keyboard_target_px"]), relative=relative)
+
+
 def qml_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for path in root.rglob("*.qml"):
@@ -236,6 +281,7 @@ def main() -> int:
         tokens = load_json(root / "docs" / "quick-design-tokens.json")
         validate_policy(policy)
         validate_tokens(tokens)
+        validate_cpp_tokens(root, tokens)
         errors = validate_qml_sources(root, policy)
         if errors:
             raise ContractError("\n".join(errors))

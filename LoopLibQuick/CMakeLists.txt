@@ -56,6 +56,10 @@ qt_add_library(LoopLibQuick SHARED
     sources/loopcanvasitemscene.cpp
     sources/loopcanvasaccessible.cpp
     sources/loopcanvasaccessible.h
+    sources/looptokens.cpp
+    sources/looptokens.h
+    sources/loopstatevisual.cpp
+    sources/loopstatevisual.h
 )
 
 # No QML_FILES. LoopCanvasItem is registered from C++ with QML_NAMED_ELEMENT,

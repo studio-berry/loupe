@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_MARKERS = {
     "PdfTool/pdftoolpreflight.cpp": (
         "reducePreflightVerdict",
+        "preflightVerdictProcessExitCode",
         "PDFOperationHistoryStore",
         "PDFOperationHistoryEvent",
     ),
@@ -28,8 +29,11 @@ REQUIRED_MARKERS = {
         "PDFOperationHistoryStore",
         "PDFOperationHistoryEvent",
     ),
-    "LoopLibCore/sources/pdfpagemasterexport.cpp": ("reducePreflightVerdict",),
+    "LoopLibCore/sources/pdfpagemasterexport.cpp": ("reducePreflightVerdict", "preflightGateFailureMessage"),
     "LoopLibCore/sources/pdfpreflightverdict.h": ("reducePreflightVerdict",),
+    "LoopLibCore/sources/pdfactionlist.cpp": ("reducePreflightVerdict", "applyCanonicalPreflightVerdict"),
+    "LoopLibCore/sources/pdfstandardconversion.cpp": ("reducePreflightVerdict",),
+    "LoopLibInteraction/sources/preflightcontroller.cpp": ("reducePreflightVerdict",),
     "LoopLibCore/sources/pdfoperationhistory.h": (
         "enum class PDFOperationHistoryEventKind",
         "struct LOOPLIBCORESHARED_EXPORT PDFOperationHistoryEvent",
@@ -37,11 +41,6 @@ REQUIRED_MARKERS = {
     "LoopLibCore/sources/pdfoperationhistorystore.h": (
         "class LOOPLIBCORESHARED_EXPORT PDFOperationHistoryStore",
         "PDFOperationResult appendEvent(PDFOperationHistoryEvent event",
-    ),
-    "LoopLibInteraction/sources/preflightcontroller.cpp": (
-        "result.inspectionComplete",
-        "State::Pass",
-        "State::Findings",
     ),
 }
 
@@ -52,7 +51,6 @@ PRODUCT_ROOTS = (
     "LoopEditor",
 )
 SOURCE_SUFFIXES = {".cpp", ".h", ".hpp", ".cc", ".cxx"}
-OVERLAY_FINDINGS_GUARD = "LoopLibInteraction/sources/preflightcontroller.cpp"
 
 
 def source_paths() -> list[Path]:
@@ -84,8 +82,13 @@ def main() -> int:
     for path in source_paths():
         path_name = relative(path)
         text = path.read_text(encoding="utf-8")
-        if path_name != OVERLAY_FINDINGS_GUARD and re.search(r"\bfindings\s*\.\s*isEmpty\s*\(\s*\)", text):
+        if re.search(r"\bfindings\s*\.\s*isEmpty\s*\(\s*\)", text):
             failures.append(f"{path_name}: independent findings.isEmpty() verdict derivation")
+        if path_name == "LoopLibInteraction/sources/preflightcontroller.cpp":
+            if re.search(r"\berrors\s*\.\s*isEmpty\s*\(\s*\)", text):
+                failures.append(f"{path_name}: independent errors.isEmpty() verdict derivation")
+            if re.search(r"\bwarnings\s*\.\s*isEmpty\s*\(\s*\)", text):
+                failures.append(f"{path_name}: independent warnings.isEmpty() verdict derivation")
         if re.search(r"\b(?:AuditEvent|AuditRecord|AuditEntry)\b", text):
             failures.append(f"{path_name}: second audit event type detected")
         if re.search(r"(?i)\.jsonl\b|\bjsonl\b", text):

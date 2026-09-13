@@ -77,8 +77,7 @@ struct PDF_Default_CJK_Font
     const char* name = nullptr;
 };
 
-static constexpr std::array S_DEFAULT_CJK_FONTS =
-{
+static constexpr std::array S_DEFAULT_CJK_FONTS = {
     PDF_Default_CJK_Font{ ECjkDefaultFontType::AdobeGB, true, "KaiTi_GB2312" },
     PDF_Default_CJK_Font{ ECjkDefaultFontType::AdobeGB, true, "Song" },
     PDF_Default_CJK_Font{ ECjkDefaultFontType::AdobeGB, false, "Heiti" },
@@ -111,15 +110,14 @@ struct PDF_Font_Replacement
     const char* replaceFont;
 };
 
-static constexpr std::array S_FONT_REPLACEMENTS
-{
-    PDF_Font_Replacement{"Futura", "Calibri"},
-    PDF_Font_Replacement{"Utopia-Bold", "Georgia"},
-    PDF_Font_Replacement{"Utopia-BoldItalic", "Georgia"},
-    PDF_Font_Replacement{"Utopia-Italic", "Georgia"},
-    PDF_Font_Replacement{"Utopia-Semibold", "Georgia"},
-    PDF_Font_Replacement{"Utopia-SemiboldItalic", "Georgia"},
-    PDF_Font_Replacement{"Utopia", "Georgia"}
+static constexpr std::array S_FONT_REPLACEMENTS{
+    PDF_Font_Replacement{ "Futura", "Calibri" },
+    PDF_Font_Replacement{ "Utopia-Bold", "Georgia" },
+    PDF_Font_Replacement{ "Utopia-BoldItalic", "Georgia" },
+    PDF_Font_Replacement{ "Utopia-Italic", "Georgia" },
+    PDF_Font_Replacement{ "Utopia-Semibold", "Georgia" },
+    PDF_Font_Replacement{ "Utopia-SemiboldItalic", "Georgia" },
+    PDF_Font_Replacement{ "Utopia", "Georgia" }
 };
 
 static bool isMicrosoftSymbolCharmap(FT_CharMap charMap)
@@ -137,7 +135,7 @@ static bool isUnicodeCharmap(FT_CharMap charMap)
     return charMap && charMap->encoding == FT_ENCODING_UNICODE;
 }
 
-template<typename Predicate>
+template <typename Predicate>
 static bool hasCharmap(FT_Face face, Predicate predicate)
 {
     for (FT_Int i = 0; i < face->num_charmaps; ++i)
@@ -151,7 +149,7 @@ static bool hasCharmap(FT_Face face, Predicate predicate)
     return false;
 }
 
-template<typename Predicate>
+template <typename Predicate>
 static FT_CharMap selectCharmap(FT_Face face, Predicate predicate)
 {
     for (FT_Int i = 0; i < face->num_charmaps; ++i)
@@ -184,7 +182,8 @@ static FT_CharMap selectSymbolicTrueTypeCMap(FT_Face face)
         return charMap;
     }
 
-    return selectCharmap(face, [](FT_CharMap charMap) { return !isUnicodeCharmap(charMap); });
+    return selectCharmap(face, [](FT_CharMap charMap)
+                         { return !isUnicodeCharmap(charMap); });
 }
 
 static FT_UInt getSymbolicTrueTypeGlyphIndex(FT_Face face, FT_CharMap charMap, FT_ULong characterCode)
@@ -213,7 +212,7 @@ struct SystemFontData
 };
 
 #if defined(Q_OS_WIN)
-template<typename T>
+template <typename T>
 static void releaseComObject(T*& object)
 {
     if (object)
@@ -268,7 +267,6 @@ static bool matchesDirectWriteFontName(const QString& fontName, const QString& c
 class PDFSystemFontInfoStorage
 {
 public:
-
     /// Returns instance of storage
     static const PDFSystemFontInfoStorage* getInstance();
 
@@ -649,33 +647,37 @@ SystemFontData PDFSystemFontInfoStorage::loadFontImpl(const FontDescriptor* desc
     }
 
     constexpr const std::array<std::pair<PDFReal, int>, 9> weights{
-            std::pair<PDFReal, int>{100, FC_WEIGHT_EXTRALIGHT},
-            std::pair<PDFReal, int>{200, FC_WEIGHT_LIGHT},
-            std::pair<PDFReal, int>{300, FC_WEIGHT_BOOK},
-            std::pair<PDFReal, int>{400, FC_WEIGHT_NORMAL},
-            std::pair<PDFReal, int>{500, FC_WEIGHT_MEDIUM},
-            std::pair<PDFReal, int>{600, FC_WEIGHT_DEMIBOLD},
-            std::pair<PDFReal, int>{700, FC_WEIGHT_BOLD},
-            std::pair<PDFReal, int>{800, FC_WEIGHT_EXTRABOLD},
-            std::pair<PDFReal, int>{900, FC_WEIGHT_EXTRABOLD}};
-    auto wit = std::lower_bound(weights.cbegin(), weights.cend(), descriptor->fontWeight, [](const std::pair<PDFReal, int>& data, PDFReal key) { return data.first < key; });
+        std::pair<PDFReal, int>{ 100, FC_WEIGHT_EXTRALIGHT },
+        std::pair<PDFReal, int>{ 200, FC_WEIGHT_LIGHT },
+        std::pair<PDFReal, int>{ 300, FC_WEIGHT_BOOK },
+        std::pair<PDFReal, int>{ 400, FC_WEIGHT_NORMAL },
+        std::pair<PDFReal, int>{ 500, FC_WEIGHT_MEDIUM },
+        std::pair<PDFReal, int>{ 600, FC_WEIGHT_DEMIBOLD },
+        std::pair<PDFReal, int>{ 700, FC_WEIGHT_BOLD },
+        std::pair<PDFReal, int>{ 800, FC_WEIGHT_EXTRABOLD },
+        std::pair<PDFReal, int>{ 900, FC_WEIGHT_EXTRABOLD }
+    };
+    auto wit = std::lower_bound(weights.cbegin(), weights.cend(), descriptor->fontWeight, [](const std::pair<PDFReal, int>& data, PDFReal key)
+                                { return data.first < key; });
     if (wit != weights.cend())
     {
         checkFontConfigError(FcPatternAddInteger(p, FC_WEIGHT, wit->second));
     }
 
     constexpr const std::array<std::pair<QFont::Stretch, int>, 9> stretches{
-        std::pair<QFont::Stretch, int>{QFont::UltraCondensed, FC_WIDTH_ULTRACONDENSED},
-        std::pair<QFont::Stretch, int>{QFont::ExtraCondensed, FC_WIDTH_EXTRACONDENSED},
-        std::pair<QFont::Stretch, int>{QFont::Condensed, FC_WIDTH_CONDENSED},
-        std::pair<QFont::Stretch, int>{QFont::SemiCondensed, FC_WIDTH_SEMICONDENSED},
-        std::pair<QFont::Stretch, int>{QFont::Unstretched, FC_WIDTH_NORMAL},
-        std::pair<QFont::Stretch, int>{QFont::SemiExpanded, FC_WIDTH_SEMIEXPANDED},
-        std::pair<QFont::Stretch, int>{QFont::Expanded, FC_WIDTH_EXPANDED},
-        std::pair<QFont::Stretch, int>{QFont::ExtraExpanded, FC_WIDTH_EXTRAEXPANDED},
-        std::pair<QFont::Stretch, int>{QFont::UltraExpanded, FC_WIDTH_ULTRAEXPANDED}};
+        std::pair<QFont::Stretch, int>{ QFont::UltraCondensed, FC_WIDTH_ULTRACONDENSED },
+        std::pair<QFont::Stretch, int>{ QFont::ExtraCondensed, FC_WIDTH_EXTRACONDENSED },
+        std::pair<QFont::Stretch, int>{ QFont::Condensed, FC_WIDTH_CONDENSED },
+        std::pair<QFont::Stretch, int>{ QFont::SemiCondensed, FC_WIDTH_SEMICONDENSED },
+        std::pair<QFont::Stretch, int>{ QFont::Unstretched, FC_WIDTH_NORMAL },
+        std::pair<QFont::Stretch, int>{ QFont::SemiExpanded, FC_WIDTH_SEMIEXPANDED },
+        std::pair<QFont::Stretch, int>{ QFont::Expanded, FC_WIDTH_EXPANDED },
+        std::pair<QFont::Stretch, int>{ QFont::ExtraExpanded, FC_WIDTH_EXTRAEXPANDED },
+        std::pair<QFont::Stretch, int>{ QFont::UltraExpanded, FC_WIDTH_ULTRAEXPANDED }
+    };
 
-    auto sit = std::find_if(stretches.cbegin(), stretches.cend(), [&](const std::pair<QFont::Stretch, int>& item) { return item.first == descriptor->fontStretch; });
+    auto sit = std::find_if(stretches.cbegin(), stretches.cend(), [&](const std::pair<QFont::Stretch, int>& item)
+                            { return item.first == descriptor->fontStretch; });
     if (sit != stretches.cend())
     {
         checkFontConfigError(FcPatternAddInteger(p, FC_WIDTH, sit->second));
@@ -691,7 +693,7 @@ SystemFontData PDFSystemFontInfoStorage::loadFontImpl(const FontDescriptor* desc
         if (FcPatternGetString(match, FC_FILE, 0, &s) == FcResultMatch)
         {
             QFile f(QString::fromUtf8(reinterpret_cast<char*>(s)));
-            if ( f.open(QIODevice::ReadOnly) )
+            if (f.open(QIODevice::ReadOnly))
             {
                 result.data = f.readAll();
                 f.close();
@@ -1023,7 +1025,6 @@ PDFFont::PDFFont(CIDSystemInfo CIDSystemInfo, QByteArray fontId, FontDescriptor 
     m_fontDescriptor(qMove(fontDescriptor)),
     m_fontId(qMove(fontId))
 {
-
 }
 
 class IRealizedFontImpl
@@ -1055,7 +1056,11 @@ public:
 class PDFRealizedType3FontImpl : public IRealizedFontImpl
 {
 public:
-    explicit PDFRealizedType3FontImpl(PDFFontPointer parentFont, PDFReal pixelSize) : m_pixelSize(pixelSize), m_parentFont(parentFont) { }
+    explicit PDFRealizedType3FontImpl(PDFFontPointer parentFont, PDFReal pixelSize) :
+        m_pixelSize(pixelSize),
+        m_parentFont(parentFont)
+    {
+    }
     virtual ~PDFRealizedType3FontImpl() override = default;
 
     PDFReal getPixelSize() const { return m_pixelSize; }
@@ -1161,7 +1166,6 @@ PDFRealizedFontImpl::PDFRealizedFontImpl() :
     m_isEmbedded(false),
     m_isVertical(false)
 {
-
 }
 
 PDFRealizedFontImpl::~PDFRealizedFontImpl()
@@ -1423,13 +1427,13 @@ void PDFRealizedFontImpl::dumpFontToTreeItem(ITreeFactory* treeFactory) const
     QString yesString = PDFTranslationContext::tr("Yes");
     QString noString = PDFTranslationContext::tr("No");
 
-    treeFactory->addItem( { PDFTranslationContext::tr("Glyph count"), QString::number(m_face->num_glyphs) });
-    treeFactory->addItem( { PDFTranslationContext::tr("Is CID keyed"), (m_face->face_flags & FT_FACE_FLAG_CID_KEYED) ? yesString : noString });
-    treeFactory->addItem( { PDFTranslationContext::tr("Is bold"), (m_face->style_flags & FT_STYLE_FLAG_BOLD) ? yesString : noString });
-    treeFactory->addItem( { PDFTranslationContext::tr("Is italics"), (m_face->style_flags & FT_STYLE_FLAG_ITALIC) ? yesString : noString });
-    treeFactory->addItem( { PDFTranslationContext::tr("Has vertical writing system"), (m_face->face_flags & FT_FACE_FLAG_VERTICAL) ? yesString : noString });
-    treeFactory->addItem( { PDFTranslationContext::tr("Has SFNT storage scheme"), (m_face->face_flags & FT_FACE_FLAG_SFNT) ? yesString : noString });
-    treeFactory->addItem( { PDFTranslationContext::tr("Has glyph names"), (m_face->face_flags & FT_FACE_FLAG_GLYPH_NAMES) ? yesString : noString });
+    treeFactory->addItem({ PDFTranslationContext::tr("Glyph count"), QString::number(m_face->num_glyphs) });
+    treeFactory->addItem({ PDFTranslationContext::tr("Is CID keyed"), (m_face->face_flags & FT_FACE_FLAG_CID_KEYED) ? yesString : noString });
+    treeFactory->addItem({ PDFTranslationContext::tr("Is bold"), (m_face->style_flags & FT_STYLE_FLAG_BOLD) ? yesString : noString });
+    treeFactory->addItem({ PDFTranslationContext::tr("Is italics"), (m_face->style_flags & FT_STYLE_FLAG_ITALIC) ? yesString : noString });
+    treeFactory->addItem({ PDFTranslationContext::tr("Has vertical writing system"), (m_face->face_flags & FT_FACE_FLAG_VERTICAL) ? yesString : noString });
+    treeFactory->addItem({ PDFTranslationContext::tr("Has SFNT storage scheme"), (m_face->face_flags & FT_FACE_FLAG_SFNT) ? yesString : noString });
+    treeFactory->addItem({ PDFTranslationContext::tr("Has glyph names"), (m_face->face_flags & FT_FACE_FLAG_GLYPH_NAMES) ? yesString : noString });
 
     if (m_face->num_charmaps > 0)
     {
@@ -1591,7 +1595,7 @@ bool PDFRealizedFontImpl::canRenderGlyphIndex(GID glyphIndex, QChar character) c
 
     if (m_face && FT_Has_PS_Glyph_Names(m_face))
     {
-        char glyphName[128] = { };
+        char glyphName[128] = {};
         if (!FT_Get_Glyph_Name(m_face, glyphIndex, glyphName, static_cast<FT_ULong>(std::size(glyphName))))
         {
             return qstrcmp(glyphName, ".notdef") != 0;
@@ -1679,7 +1683,7 @@ PDFRealizedFontPointer PDFRealizedFont::createRealizedFont(PDFFontPointer font, 
             Q_ASSERT(!impl->m_embeddedFontData.isEmpty());
 
             PDFRealizedFontImpl::checkFreeTypeError(FT_New_Memory_Face(impl->m_library, reinterpret_cast<const FT_Byte*>(impl->m_embeddedFontData.constData()), impl->m_embeddedFontData.size(), 0, &impl->m_face));
-            FT_Select_Charmap(impl->m_face, FT_ENCODING_UNICODE); // We try to select unicode encoding, but if it fails, we don't do anything (use glyph indices instead)
+            FT_Select_Charmap(impl->m_face, FT_ENCODING_UNICODE);   // We try to select unicode encoding, but if it fails, we don't do anything (use glyph indices instead)
             PDFRealizedFontImpl::checkFreeTypeError(FT_Set_Pixel_Sizes(impl->m_face, 0, qRound(pixelSize * PDFRealizedFontImpl::PIXEL_SIZE_MULTIPLIER)));
             impl->m_isVertical = cmap ? cmap->isVertical() : false;
             impl->m_isEmbedded = true;
@@ -1709,7 +1713,7 @@ PDFRealizedFontPointer PDFRealizedFont::createRealizedFont(PDFFontPointer font, 
                 throw PDFException(PDFTranslationContext::tr("System font '%1' is too large to be loaded by FreeType.").arg(QString::fromLatin1(descriptor->fontName)));
             }
             PDFRealizedFontImpl::checkFreeTypeError(FT_New_Memory_Face(impl->m_library, reinterpret_cast<const FT_Byte*>(impl->m_systemFontData.constData()), static_cast<FT_Long>(impl->m_systemFontData.size()), impl->m_systemFontFaceIndex, &impl->m_face));
-            FT_Select_Charmap(impl->m_face, FT_ENCODING_UNICODE); // We try to select unicode encoding, but if it fails, we don't do anything (use glyph indices instead)
+            FT_Select_Charmap(impl->m_face, FT_ENCODING_UNICODE);   // We try to select unicode encoding, but if it fails, we don't do anything (use glyph indices instead)
             PDFRealizedFontImpl::checkFreeTypeError(FT_Set_Pixel_Sizes(impl->m_face, 0, qRound(pixelSize * PDFRealizedFontImpl::PIXEL_SIZE_MULTIPLIER)));
             impl->m_isVertical = cmap ? cmap->isVertical() : false;
             impl->m_isEmbedded = false;
@@ -1851,7 +1855,7 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
         std::pair<const char*, FontType>{ "Type0", FontType::Type0 },
         std::pair<const char*, FontType>{ "Type1", FontType::Type1 },
         std::pair<const char*, FontType>{ "TrueType", FontType::TrueType },
-        std::pair<const char*, FontType>{ "Type3", FontType::Type3},
+        std::pair<const char*, FontType>{ "Type3", FontType::Type3 },
         std::pair<const char*, FontType>{ "MMType1", FontType::MMType1 }
     };
 
@@ -1921,11 +1925,11 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
     // After the encoding is obtained, try to extract glyph indices for embedded font.
 
     PDFEncoding::Encoding encoding = PDFEncoding::Encoding::Invalid;
-    encoding::EncodingTable simpleFontEncodingTable = { };
-    encoding::EncodingTable simpleFontToUnicodeTable = { };
+    encoding::EncodingTable simpleFontEncodingTable = {};
+    encoding::EncodingTable simpleFontToUnicodeTable = {};
     bool hasToUnicode = false;
-    GlyphIndices glyphIndexArray = { };
-    GlyphNames glyphNameArray = { };
+    GlyphIndices glyphIndexArray = {};
+    GlyphNames glyphNameArray = {};
     switch (fontType)
     {
         case FontType::Type1:
@@ -1933,8 +1937,8 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
         case FontType::TrueType:
         {
             bool hasDifferences = false;
-            encoding::EncodingTable differences = { };
-            GlyphNames differenceGlyphNames = { };
+            encoding::EncodingTable differences = {};
+            GlyphNames differenceGlyphNames = {};
             bool useEmbeddedBuiltInEncoding = false;
 
             if (fontDictionary->hasKey("Encoding"))
@@ -2108,8 +2112,8 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
                 for (size_t i = 0; i < standardEncoding.size(); ++i)
                 {
                     if (differenceGlyphNames[i].isEmpty() &&
-                            (simpleFontEncodingTable[i].isNull() || simpleFontEncodingTable[i] == QChar(QChar::SpecialCharacter::ReplacementCharacter)) &&
-                            (!standardEncoding[i].isNull() && standardEncoding[i] != QChar(QChar::SpecialCharacter::ReplacementCharacter)))
+                        (simpleFontEncodingTable[i].isNull() || simpleFontEncodingTable[i] == QChar(QChar::SpecialCharacter::ReplacementCharacter)) &&
+                        (!standardEncoding[i].isNull() && standardEncoding[i] != QChar(QChar::SpecialCharacter::ReplacementCharacter)))
                     {
                         simpleFontEncodingTable[i] = standardEncoding[i];
                     }
@@ -2163,7 +2167,7 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
                                                     glyphIndexArray[iTable] = glyphIndex;
 
                                                     // Set mapping to unicode
-                                                    char buffer[128] = { };
+                                                    char buffer[128] = {};
                                                     if (!FT_Get_Glyph_Name(face, glyphIndex, buffer, static_cast<FT_ULong>(std::size(buffer))))
                                                     {
                                                         QByteArray byteArrayBuffer(buffer);
@@ -2362,7 +2366,7 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
 
             // Read default advance
             PDFReal dw = fontLoader.readNumberFromDictionary(descendantFontDictionary, "DW", 1000.0);
-            std::array<PDFReal, 2> dw2 = { };
+            std::array<PDFReal, 2> dw2 = {};
             fontLoader.readNumberArrayFromDictionary(descendantFontDictionary, "DW2", dw2.begin(), dw2.end());
             PDFReal defaultWidth = descendantFontDictionary->hasKey("DW") ? dw : dw2.back();
 
@@ -2370,51 +2374,51 @@ PDFFontPointer PDFFont::createFont(const PDFObject& object, QByteArray fontId, c
             std::unordered_map<CID, PDFReal> advances;
             if (descendantFontDictionary->hasKey("W"))
             {
-                 const PDFObject& wArrayObject = document->getObject(descendantFontDictionary->get("W"));
-                 if (wArrayObject.isArray())
-                 {
-                     const PDFArray* wArray = wArrayObject.getArray();
-                     const size_t size = wArray->getCount();
+                const PDFObject& wArrayObject = document->getObject(descendantFontDictionary->get("W"));
+                if (wArrayObject.isArray())
+                {
+                    const PDFArray* wArray = wArrayObject.getArray();
+                    const size_t size = wArray->getCount();
 
-                     static constexpr CID MAX_W_ARRAY_RANGE = 1'000'000;
-                     for (size_t i = 0; i < size;)
-                     {
-                         CID startCID = fontLoader.readInteger(wArray->getItem(i++), 0);
-                         if (i >= size)
-                         {
-                             break;
-                         }
-                         const PDFObject& arrayOrCID = document->getObject(wArray->getItem(i++));
+                    static constexpr CID MAX_W_ARRAY_RANGE = 1'000'000;
+                    for (size_t i = 0; i < size;)
+                    {
+                        CID startCID = fontLoader.readInteger(wArray->getItem(i++), 0);
+                        if (i >= size)
+                        {
+                            break;
+                        }
+                        const PDFObject& arrayOrCID = document->getObject(wArray->getItem(i++));
 
-                         if (arrayOrCID.isInt())
-                         {
-                             if (i >= size)
-                             {
-                                 break;
-                             }
-                             CID endCID = arrayOrCID.getInteger();
-                             if (endCID < startCID || static_cast<uint64_t>(endCID - startCID) > MAX_W_ARRAY_RANGE)
-                             {
-                                 continue;
-                             }
-                             PDFReal width = fontLoader.readInteger(wArray->getItem(i++), 0);
-                             for (CID currentCID = startCID; currentCID <= endCID; ++currentCID)
-                             {
-                                 advances[currentCID] = width;
-                             }
-                         }
-                         else if (arrayOrCID.isArray())
-                         {
-                             const PDFArray* widthArray = arrayOrCID.getArray();
-                             const size_t widthArraySize = widthArray->getCount();
-                             for (size_t widthArrayIndex = 0; widthArrayIndex < widthArraySize; ++widthArrayIndex)
-                             {
-                                 PDFReal width = fontLoader.readNumber(widthArray->getItem(widthArrayIndex), 0);
-                                 advances[startCID + static_cast<CID>(widthArrayIndex)] = width;
-                             }
-                         }
-                     }
-                 }
+                        if (arrayOrCID.isInt())
+                        {
+                            if (i >= size)
+                            {
+                                break;
+                            }
+                            CID endCID = arrayOrCID.getInteger();
+                            if (endCID < startCID || static_cast<uint64_t>(endCID - startCID) > MAX_W_ARRAY_RANGE)
+                            {
+                                continue;
+                            }
+                            PDFReal width = fontLoader.readInteger(wArray->getItem(i++), 0);
+                            for (CID currentCID = startCID; currentCID <= endCID; ++currentCID)
+                            {
+                                advances[currentCID] = width;
+                            }
+                        }
+                        else if (arrayOrCID.isArray())
+                        {
+                            const PDFArray* widthArray = arrayOrCID.getArray();
+                            const size_t widthArraySize = widthArray->getCount();
+                            for (size_t widthArrayIndex = 0; widthArrayIndex < widthArraySize; ++widthArrayIndex)
+                            {
+                                PDFReal width = fontLoader.readNumber(widthArray->getItem(widthArrayIndex), 0);
+                                advances[startCID + static_cast<CID>(widthArrayIndex)] = width;
+                            }
+                        }
+                    }
+                }
             }
 
             PDFFontCMap toUnicodeCMap;
@@ -2583,7 +2587,6 @@ PDFSimpleFont::PDFSimpleFont(CIDSystemInfo cidSystemInfo,
     m_glyphNames(qMove(glyphNames)),
     m_standardFontType(standardFontType)
 {
-
 }
 
 QChar PDFSimpleFont::getUnicode(CID cid) const
@@ -2658,39 +2661,39 @@ void PDFSimpleFont::dumpFontToTreeItem(ITreeFactory* treeFactory) const
     QString encodingTypeString;
     switch (m_encodingType)
     {
-       case PDFEncoding::Encoding::Standard:
+        case PDFEncoding::Encoding::Standard:
             encodingTypeString = PDFTranslationContext::tr("Standard");
             break;
 
-       case PDFEncoding::Encoding::MacRoman:
+        case PDFEncoding::Encoding::MacRoman:
             encodingTypeString = PDFTranslationContext::tr("Mac Roman");
             break;
 
-       case PDFEncoding::Encoding::WinAnsi:
+        case PDFEncoding::Encoding::WinAnsi:
             encodingTypeString = PDFTranslationContext::tr("Win Ansi");
             break;
 
-       case PDFEncoding::Encoding::PDFDoc:
+        case PDFEncoding::Encoding::PDFDoc:
             encodingTypeString = PDFTranslationContext::tr("PDF Doc");
             break;
 
-       case PDFEncoding::Encoding::MacExpert:
+        case PDFEncoding::Encoding::MacExpert:
             encodingTypeString = PDFTranslationContext::tr("Mac Expert");
             break;
 
-       case PDFEncoding::Encoding::Symbol:
+        case PDFEncoding::Encoding::Symbol:
             encodingTypeString = PDFTranslationContext::tr("Symbol");
             break;
 
-       case PDFEncoding::Encoding::ZapfDingbats:
+        case PDFEncoding::Encoding::ZapfDingbats:
             encodingTypeString = PDFTranslationContext::tr("Zapf Dingbats");
             break;
 
-       case PDFEncoding::Encoding::MacOsRoman:
+        case PDFEncoding::Encoding::MacOsRoman:
             encodingTypeString = PDFTranslationContext::tr("Mac OS Roman");
             break;
 
-       case PDFEncoding::Encoding::Custom:
+        case PDFEncoding::Encoding::Custom:
             encodingTypeString = PDFTranslationContext::tr("Custom");
             break;
 
@@ -2723,7 +2726,6 @@ PDFType1Font::PDFType1Font(FontType fontType,
     PDFSimpleFont(qMove(cidSystemInfo), qMove(fontId), qMove(fontDescriptor), qMove(name), qMove(baseFont), firstChar, lastChar, qMove(widths), encodingType, encoding, toUnicode, hasToUnicode, standardFontType, glyphIndices, qMove(glyphNames)),
     m_fontType(fontType)
 {
-
 }
 
 FontType PDFType1Font::getFontType() const
@@ -2863,15 +2865,15 @@ const PDFFontCache::TextDrawingFontInfo* PDFFontCache::getFontForTextDrawing(con
                 substituteFont.setWeight(QFont::Weight(qBound(1, int(descriptor->fontWeight), 1000)));
                 substituteFont.setStretch(descriptor->fontStretch);
                 substituteFont.setItalic(descriptor->isItalic());
-                substituteFont.setStyleHint(descriptor->isFixedPitch() ? QFont::Monospace :
-                                             descriptor->isSerif() ? QFont::Serif : QFont::SansSerif);
+                substituteFont.setStyleHint(descriptor->isFixedPitch() ? QFont::Monospace : descriptor->isSerif() ? QFont::Serif
+                                                                                                                  : QFont::SansSerif);
                 info.font = substituteFont;
                 info.isUsable = true;
 
                 if (reporter)
                 {
                     reporter->reportRenderErrorOnce(RenderErrorType::Warning,
-                                                     PDFTranslationContext::tr("Font '%1' is not embedded, using substitute font for real text drawing.").arg(QString::fromLatin1(descriptor->fontName)));
+                                                    PDFTranslationContext::tr("Font '%1' is not embedded, using substitute font for real text drawing.").arg(QString::fromLatin1(descriptor->fontName)));
                 }
             }
         }
@@ -3018,7 +3020,7 @@ PDFFontCMap PDFFontCMap::createFromName(const QByteArray& name)
 PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
 {
     Entries entries;
-    entries.reserve(1024); // Arbitrary number, we have enough memory, better than perform reallocation each time
+    entries.reserve(1024);   // Arbitrary number, we have enough memory, better than perform reallocation each time
 
     std::vector<PDFFontCMap> additionalMappings;
     PDFLexicalAnalyzer parser(data.constBegin(), data.constEnd());
@@ -3036,7 +3038,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             continue;
         }
 
-        auto fetchCode = [] (const PDFLexicalAnalyzer::Token& currentToken) -> std::pair<unsigned int, unsigned int>
+        auto fetchCode = [](const PDFLexicalAnalyzer::Token& currentToken) -> std::pair<unsigned int, unsigned int>
         {
             if (currentToken.type == PDFLexicalAnalyzer::TokenType::String)
             {
@@ -3054,7 +3056,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             throw PDFException(PDFTranslationContext::tr("Can't fetch code from CMap definition."));
         };
 
-        auto fetchCID = [] (const PDFLexicalAnalyzer::Token& currentToken) -> CID
+        auto fetchCID = [](const PDFLexicalAnalyzer::Token& currentToken) -> CID
         {
             if (currentToken.type == PDFLexicalAnalyzer::TokenType::Integer)
             {
@@ -3084,6 +3086,21 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             return 0;
         };
 
+        // A truncated CMap is malformed input, not an empty one. PDFLexicalAnalyzer
+        // returns EndOfFile for every fetch past the end of the buffer, so a range
+        // operator whose terminator is missing would spin here forever and grow
+        // `entries` until the process is killed (hostile /ToUnicode stream). Every
+        // fetch inside a range operator therefore fails closed on EndOfFile.
+        auto fetchRequired = [&parser](const char* operatorName)
+        {
+            PDFLexicalAnalyzer::Token fetchedToken = parser.fetch();
+            if (fetchedToken.type == PDFLexicalAnalyzer::TokenType::EndOfFile)
+            {
+                throw PDFException(PDFTranslationContext::tr("CMap operator '%1' is not terminated.").arg(QString::fromLatin1(operatorName)));
+            }
+            return fetchedToken;
+        };
+
         if (token.type == PDFLexicalAnalyzer::TokenType::Command)
         {
             QByteArray command = token.data.toByteArray();
@@ -3102,16 +3119,16 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             {
                 while (true)
                 {
-                    PDFLexicalAnalyzer::Token token1 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token1 = fetchRequired("beginbfrange");
 
                     if (token1.type == PDFLexicalAnalyzer::TokenType::Command &&
-                            token1.data.toByteArray() == "endbfrange")
+                        token1.data.toByteArray() == "endbfrange")
                     {
                         break;
                     }
 
-                    PDFLexicalAnalyzer::Token token2 = parser.fetch();
-                    PDFLexicalAnalyzer::Token token3 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token2 = fetchRequired("beginbfrange");
+                    PDFLexicalAnalyzer::Token token3 = fetchRequired("beginbfrange");
 
                     std::pair<unsigned int, unsigned int> from = fetchCode(token1);
                     std::pair<unsigned int, unsigned int> to = fetchCode(token2);
@@ -3122,7 +3139,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
 
                         while (true)
                         {
-                            PDFLexicalAnalyzer::Token arrayToken = parser.fetch();
+                            PDFLexicalAnalyzer::Token arrayToken = fetchRequired("beginbfrange");
 
                             // Do we have end of array?
                             if (arrayToken.type == PDFLexicalAnalyzer::TokenType::ArrayEnd)
@@ -3146,7 +3163,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             {
                 while (true)
                 {
-                    PDFLexicalAnalyzer::Token token1 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token1 = fetchRequired("begincidrange");
 
                     if (token1.type == PDFLexicalAnalyzer::TokenType::Command &&
                         token1.data.toByteArray() == "endcidrange")
@@ -3154,8 +3171,8 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
                         break;
                     }
 
-                    PDFLexicalAnalyzer::Token token2 = parser.fetch();
-                    PDFLexicalAnalyzer::Token token3 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token2 = fetchRequired("begincidrange");
+                    PDFLexicalAnalyzer::Token token3 = fetchRequired("begincidrange");
 
                     std::pair<unsigned int, unsigned int> from = fetchCode(token1);
                     std::pair<unsigned int, unsigned int> to = fetchCode(token2);
@@ -3168,7 +3185,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             {
                 while (true)
                 {
-                    PDFLexicalAnalyzer::Token token1 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token1 = fetchRequired("begincidchar");
 
                     if (token1.type == PDFLexicalAnalyzer::TokenType::Command &&
                         token1.data.toByteArray() == "endcidchar")
@@ -3176,7 +3193,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
                         break;
                     }
 
-                    PDFLexicalAnalyzer::Token token2 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token2 = fetchRequired("begincidchar");
 
                     std::pair<unsigned int, unsigned int> code = fetchCode(token1);
                     CID cid = fetchCID(token2);
@@ -3188,7 +3205,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
             {
                 while (true)
                 {
-                    PDFLexicalAnalyzer::Token token1 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token1 = fetchRequired("beginbfchar");
 
                     if (token1.type == PDFLexicalAnalyzer::TokenType::Command &&
                         token1.data.toByteArray() == "endbfchar")
@@ -3196,7 +3213,7 @@ PDFFontCMap PDFFontCMap::createFromData(const QByteArray& data)
                         break;
                     }
 
-                    PDFLexicalAnalyzer::Token token2 = parser.fetch();
+                    PDFLexicalAnalyzer::Token token2 = fetchRequired("beginbfchar");
 
                     std::pair<unsigned int, unsigned int> code = fetchCode(token1);
                     CID cid = fetchUnicode(token2);
@@ -3343,7 +3360,8 @@ std::vector<PDFFontCMap::MappedCode> PDFFontCMap::interpretWithCode(const QByteA
         ++scannedBytes;
 
         // Find suitable mapping
-        auto it = std::find_if(m_entries.cbegin(), m_entries.cend(), [value, scannedBytes](const Entry& entry) { return entry.from <= value && entry.to >= value && entry.byteCount == scannedBytes; });
+        auto it = std::find_if(m_entries.cbegin(), m_entries.cend(), [value, scannedBytes](const Entry& entry)
+                               { return entry.from <= value && entry.to >= value && entry.byteCount == scannedBytes; });
         if (it != m_entries.cend())
         {
             const Entry& entry = *it;
@@ -3404,10 +3422,10 @@ QChar PDFFontCMap::getToUnicode(CID cid, unsigned int byteCount) const
 {
     if (isValid())
     {
-        auto it = std::find_if(m_entries.cbegin(), m_entries.cend(), [cid, byteCount](const Entry& entry) {
+        auto it = std::find_if(m_entries.cbegin(), m_entries.cend(), [cid, byteCount](const Entry& entry)
+                               {
             const bool byteCountMatches = byteCount == 0 || entry.byteCount == byteCount;
-            return byteCountMatches && entry.from <= cid && entry.to >= cid;
-        });
+            return byteCountMatches && entry.from <= cid && entry.to >= cid; });
         if (it != m_entries.cend())
         {
             const Entry& entry = *it;
@@ -3469,7 +3487,8 @@ void PDFFontCMap::enumerate(const std::function<void(unsigned int, unsigned int,
 
 bool PDFFontCMap::containsCode(unsigned int code, unsigned int byteCount) const
 {
-    return std::any_of(m_entries.cbegin(), m_entries.cend(), [code, byteCount](const Entry& entry) { return entry.from <= code && entry.to >= code && entry.byteCount == byteCount; });
+    return std::any_of(m_entries.cbegin(), m_entries.cend(), [code, byteCount](const Entry& entry)
+                       { return entry.from <= code && entry.to >= code && entry.byteCount == byteCount; });
 }
 
 PDFFontCMap::PDFFontCMap(Entries&& entries, bool vertical, bool unicodeEncoded) :
@@ -3478,7 +3497,8 @@ PDFFontCMap::PDFFontCMap(Entries&& entries, bool vertical, bool unicodeEncoded) 
     m_vertical(vertical),
     m_unicodeEncoded(unicodeEncoded)
 {
-    m_maxKeyLength = std::accumulate(m_entries.cbegin(), m_entries.cend(), 0, [](unsigned int a, const Entry& b) { return qMax(a, b.byteCount); });
+    m_maxKeyLength = std::accumulate(m_entries.cbegin(), m_entries.cend(), 0, [](unsigned int a, const Entry& b)
+                                     { return qMax(a, b.byteCount); });
 }
 
 PDFFontCMap::Entries PDFFontCMap::optimize(const PDFFontCMap::Entries& entries)
@@ -3565,7 +3585,6 @@ bool PDFFontCMapRepository::loadFromFile(const QString& fileName)
 
 PDFFontCMapRepository::PDFFontCMapRepository()
 {
-
 }
 
 PDFReal PDFType0Font::getGlyphAdvance(CID cid) const
@@ -3611,7 +3630,7 @@ void PDFType0Font::buildEncodeMap() const
     // the ToUnicode character is still produced by the forward pass.
     const unsigned int maxKeyLength = m_cmap.getMaxKeyLength();
     m_toUnicode.enumerate([&, this](unsigned int code, unsigned int byteCount, CID unicodeValue)
-    {
+                          {
         if (unicodeValue == 0)
         {
             return;
@@ -3635,8 +3654,7 @@ void PDFType0Font::buildEncodeMap() const
             return;
         }
 
-        m_encodeMap.emplace(codePoint, serializeCode(code, byteCount));
-    });
+        m_encodeMap.emplace(codePoint, serializeCode(code, byteCount)); });
 
     // Pass 2: for unicode encoded predefined CMaps of non-embedded fonts, the forward
     // pass falls back to interpreting the character code directly as unicode, but only
@@ -3644,7 +3662,7 @@ void PDFType0Font::buildEncodeMap() const
     if (!m_fontDescriptor.isEmbedded() && m_cmap.isUnicodeEncoded())
     {
         m_cmap.enumerate([&, this](unsigned int code, unsigned int byteCount, CID)
-        {
+                         {
             if (code == 0 || code > 0xFFFF)
             {
                 return;
@@ -3661,8 +3679,7 @@ void PDFType0Font::buildEncodeMap() const
                 return;
             }
 
-            m_encodeMap.emplace(codePoint, serializeCode(code, byteCount));
-        });
+            m_encodeMap.emplace(codePoint, serializeCode(code, byteCount)); });
     }
 }
 
@@ -3684,7 +3701,6 @@ PDFType3Font::PDFType3Font(FontDescriptor fontDescriptor,
     m_resources(resources),
     m_toUnicode(qMove(toUnicode))
 {
-
 }
 
 FontType PDFType3Font::getFontType() const

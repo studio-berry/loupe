@@ -13,7 +13,12 @@
         "dpi": { "type": "integer", "minimum": 1, "maximum": 1200 },
         "languages": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ISO 639 code, e.g. 'en' or 'ch_sim'. Case is normalized to lower case by the service.",
+            "pattern": "^[A-Za-z]{2,3}(_[A-Za-z]{2,4})?$"
+          }
         },
         "media_box": { "$ref": "#/$defs/mediaBox" },
         "rotation": { "type": "integer", "enum": [0, 90, 180, 270] }

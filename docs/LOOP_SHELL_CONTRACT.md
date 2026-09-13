@@ -23,7 +23,7 @@ is a navigable slice, not the Phase 4 operator loop or GUI exit gate.
 The repository may contain qualification-only Quick harnesses (`QuickShellSmoke`,
 `CanvasBenchmark`); they are not product UI.
 
-The eventual shell has these workspace IDs:
+The LoopEditor shell exposes these workspace IDs:
 
 | Workspace | Semantic owner | Operator state preserved |
 | --- | --- | --- |
@@ -35,14 +35,18 @@ The eventual shell has these workspace IDs:
 | Fix | bounded Core/PdfTool operations | document, preflight |
 | Compare | Core `PDFDiff`, pending product decision | document, preflight |
 
-The eventual composition is intentionally recorded as a contract rather than
-implemented UI:
+The implemented composition is:
 
 ```text
 toolbar: open · save/export · undo/redo · select/hand · zoom · preflight · preview
-workspace rail | PDF canvas | contextual inspector
-status: document state · production state · preflight state
+workspace rail (7 IDs) | workspace stack | Document: pages rail | PDF canvas | contextual inspector dock
+status: document state · production state · preflight state · page/zoom
 ```
+
+Manifest-driven menus group the 107 catalog actions by shell menu and
+workspace `target`, with `ADVANCED` actions gated behind the release-profile
+developer diagnostics flag. Compare remains visible on the rail but disabled
+until the product decision closes.
 
 The canvas remains the existing PDF rendering surface. The inspector is a
 single context dispatcher for page, image, finding, separation, and empty-canvas
@@ -63,9 +67,7 @@ of PDF operations.
 
 ## State and status
 
-The shell keeps document, production, and preflight state distinct. The status
-bar must make these states visible without opening a dialog when GUI work is
-eventually enabled.
+The shell keeps document, production, and preflight state distinct. The status bar makes these states visible without opening a dialog.
 
 - Document: `NO_DOCUMENT`, `OPEN`, `MODIFIED`, `OUTPUT_PENDING`, `OUTPUT_SAVED`.
 - Production: `NOT_READY`, `READY`, `OPERATION_PENDING`,
@@ -76,6 +78,36 @@ eventually enabled.
 `NOT_CHECKED`, `STALE`, and `INCOMPLETE` are explicit states, never empty UI or
 implicit success. A correction that changes the bound document revision makes
 the prior preflight result `STALE` until revalidation completes.
+
+### The preflight workspace surface
+
+The Preflight workspace is a workflow surface, not a report viewer: the operator
+can see the state and run, cancel, and export from it. It renders Core's state
+and forwards intent through `EditorHost`; it computes no pass, no severity, and
+no state wording of its own.
+
+| Element | Bound to |
+| --- | --- |
+| State badge | `EditorHost::preflightStateColor` (the #194 colour role for the canonical state kind) and `preflightStateVisual.accessibleName` (the screen-reader name); the pane chooses neither |
+| Operator summary | `EditorHost::preflightOperatorSummary` — Core's own words |
+| Profile selector | `EditorHost::preflightProfiles` (`id,name,version,source,valid,diagnostic`), `selectedPreflightProfileId`, `selectPreflightProfile(id)`; disabled while a run is in flight |
+| Run | enabled when the state is not `RUNNING` and a profile is selected → `runPreflight()` |
+| Cancel | enabled only while `RUNNING` → `cancelPreflight()` |
+| Export report | enabled when a report is retained → `requestPreflightReportExport()` |
+| Findings list | `PreflightController::findingsModel`; activating a finding calls `selectFinding(findingId)`, and Return navigates to the selected row's evidence |
+
+Kind, colour role, icon, and accessible name all come from
+`pdfquick::tokens::resolvePreflightStateVisual()` in LoopLibQuick, which maps
+Core's state names (`not-checked`, `running`, `cancelled`, `pass`, `findings`,
+`stale`, `incomplete`, `error`, and the empty state of an untouched document)
+onto the #194 kinds. Only a real pass resolves as `Passed`; incomplete, stale,
+cancelled, and unrecognised states decline to look like one. The pane is
+therefore a pure renderer — the GUI holds no second interpretation of
+preflight truth.
+
+`ProductQuickAccessibilitySmoke` (see `scripts/run-product-quick-a11y-smoke.ps1`)
+pins the entry point: a freshly opened document must expose the preflight pane
+with a screen-reader name and must report `not-checked`.
 
 ### Document status is a projection, not a second state machine
 

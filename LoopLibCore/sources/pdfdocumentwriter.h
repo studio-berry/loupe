@@ -50,6 +50,18 @@ public:
         Incremental
     };
 
+    /// What an incremental save actually did. Every refusal to append is already
+    /// reported as a failed PDFOperationResult naming the reason, but one success
+    /// path is not an append at all: a document with no changed objects is
+    /// byte-copied. A caller that asked for an incremental save specifically to
+    /// preserve `Prev`/signature coverage needs to be able to tell those apart,
+    /// so writeIncremental reports the outcome on request.
+    enum class IncrementalWriteOutcome
+    {
+        Appended,   ///< Changed objects plus a new xref section were appended
+        CopiedUnchanged   ///< Nothing changed; the original bytes were copied verbatim
+    };
+
     explicit inline PDFDocumentWriter(PDFProgress* progress,
                                       const PDFOperationControl* operationControl = nullptr) :
         m_operationControl(operationControl)
@@ -83,18 +95,38 @@ public:
     /// Appends an incremental update to an existing PDF. The original bytes
     /// are copied unchanged and only changed objects plus a new xref/trailer
     /// section are appended.
+    ///
+    /// This is the original four-argument entry point. It is kept as a real
+    /// exported overload (not a defaulted parameter on the reporting one) so
+    /// existing binaries keep resolving the same mangled symbol, and so a
+    /// four-argument call is not ambiguous.
     PDFOperationResult writeIncremental(const QString& fileName,
-                                         const PDFDocument* originalDocument,
-                                         const PDFDocument* document,
-                                         bool safeWrite);
+                                        const PDFDocument* originalDocument,
+                                        const PDFDocument* document,
+                                        bool safeWrite);
 
-    /// Writes an incremental update using the supplied original bytes. This
-    /// overload is useful for callers that already hold the source buffer and
-    /// for byte-preservation tests.
+    /// As above, and reports through \p outcome what the save actually did.
+    /// \p outcome is set only on success.
+    PDFOperationResult writeIncremental(const QString& fileName,
+                                        const PDFDocument* originalDocument,
+                                        const PDFDocument* document,
+                                        bool safeWrite,
+                                        IncrementalWriteOutcome* outcome);
+
+    /// Writes an incremental update using the supplied original bytes. Kept for
+    /// the same binary-compatibility reason as the four-argument file overload.
     PDFOperationResult writeIncremental(QIODevice* device,
-                                         const QByteArray& originalData,
-                                         const PDFDocument* originalDocument,
-                                         const PDFDocument* document);
+                                        const QByteArray& originalData,
+                                        const PDFDocument* originalDocument,
+                                        const PDFDocument* document);
+
+    /// As above, and reports through \p outcome what the save actually did.
+    /// \p outcome is set only on success.
+    PDFOperationResult writeIncremental(QIODevice* device,
+                                        const QByteArray& originalData,
+                                        const PDFDocument* originalDocument,
+                                        const PDFDocument* document,
+                                        IncrementalWriteOutcome* outcome);
 
     /// Chooses the default save mode for an existing document. Save As and
     /// destructive operations must pass the corresponding opt-out flags.
@@ -139,4 +171,4 @@ private:
 
 }   // namespace pdf
 
-#endif // PDFDOCUMENTWRITER_H
+#endif   // PDFDOCUMENTWRITER_H

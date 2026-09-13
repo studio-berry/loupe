@@ -468,6 +468,7 @@ void QuickCanvasTest::traceOverlayCarriesNoDocumentPayload()
     pdfinteraction::ManualClock clock;
     pdfinteraction::InteractionTraceRecorder recorder(clock);
     recorder.setTraceId(QStringLiteral("session-1"));
+    recorder.recordAsyncWorkKinds({ QStringLiteral("preflight") });
 
     m_controller->setTraceRecorder(&recorder);
     bindItem();
@@ -493,6 +494,8 @@ void QuickCanvasTest::traceOverlayCarriesNoDocumentPayload()
     QVERIFY(!rendered.contains(QStringLiteral("doc-1")));
     QVERIFY(!rendered.contains(QStringLiteral("1379")));
     QVERIFY(!rendered.contains(QStringLiteral("2473")));
+    QVERIFY(rendered.contains(QStringLiteral("async work")));
+    QVERIFY(rendered.contains(QStringLiteral("preflight")));
 
     // The recorded trace itself must not carry the typed text either.
     const QString trace = QString::fromUtf8(QJsonDocument(recorder.trace().toJson()).toJson(QJsonDocument::Compact));

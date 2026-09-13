@@ -19,7 +19,7 @@ regression corpus. The gate is green on the commit containing both.
 | Fuzz on `master` (MIC-326) | **Pass** | [Run 30937285025](https://github.com/mberrys/Loop-pdf/actions/runs/30937285025) — green on `9ed6a8e2` at the full 600 s/target budget. That commit contains both PR #63 (overflow + first budget) and PR #65 (`accountDecodeWork` + regression corpus), which together close the two findings from [run 30803378370](https://github.com/mberrys/Loop-pdf/actions/runs/30803378370) |
 | Windows MSI smoke (MIC-301 / MIC-327) | **Pass** | [Run 30792705392](https://github.com/mberrys/Loop-pdf/actions/runs/30792705392) — green after the WiX ICU/harvest fixes (`7127f65`, `29b553f`) |
 | Linux AppImage smoke (MIC-301) | **Pass** | [Run 30787629154](https://github.com/mberrys/Loop-pdf/actions/runs/30787629154) with `scripts/smoke-test-appimage.sh` |
-| Overprint disclosure (MIC-330) | **Pass** | `overprintDisclosureText()` always shown; README + runbook R-002; `tst_preflightplugintest.cpp`. The additional canvas fidelity indicator remains pending PR #395 and is not counted in the current-state evidence — see §3 R-002 |
+| Overprint disclosure (MIC-330) | **Pass** | `overprintDisclosureText()` always shown; README + runbook R-002; `tst_operatoracceptance.cpp` (`overprintDisclosureText_alwaysShownEvenWithoutFinding`, `overprintDisclosureText_addsSpecificWarningForWhiteOverprintFinding`). The additional canvas fidelity indicator remains pending PR #395 and is not counted in the current-state evidence — see §3 R-002 |
 | Unsigned installer disclosure (MIC-342) | **Pass** | README Install section + runbook R-016 + `SHA256SUMS.txt` via `CreateReleaseDraft.yml` |
 
 No launch-blocking gate remains open. The next step is the owner review in §8.
@@ -38,8 +38,8 @@ the engine emitted `schema_version: 3` while the plugin validator capped at `2`,
 
 That was not true at the time of writing, and is not true now:
 
-- `LoopLibCore/sources/preflightengine.h:42` → `PREFLIGHT_REPORT_SCHEMA_VERSION = 3`
-- `LoopEditorPlugins/LoopPreflightPlugin/preflightsidecarutils.h:38` →
+- `LoopLibCore/sources/preflightengine.h:52` → `PREFLIGHT_REPORT_SCHEMA_VERSION = 3`
+- `UnitTests/support/preflight/preflightsidecarutils.h:42` →
   `LOOP_PREFLIGHT_SCHEMA_VERSION 3`, with `isSupportedSchemaVersion` accepting 1–3
 - The fix is commit `c515bfa3`, merged to `master` via `ba428f1b` (PR #54) at
   2026-07-24 10:58 PDT
@@ -104,7 +104,7 @@ first *paid* distribution, not this launch. See §5 and `docs/PACKAGING_LICENSIN
 
 | Role | Surface | Notes |
 |------|---------|-------|
-| **Operator** | LoopEditor + LoopPreflightPlugin | Primary V1 sellable loop |
+| **Operator** | LoopEditor (Quick shell; preflight is in-process since the widget plugin retired) | Primary V1 sellable loop |
 | **Automation / CI** | PdfTool CLI | `preflight`, `add-bleed`, `ocr` (optional) |
 | **Power user** | PageMaster, Diff, Viewer, LaunchPad | Adjacent; not V1 contract |
 | **Maintainer** | GitHub Actions, packaging scripts | Release engineering |
@@ -174,9 +174,9 @@ Logging: PdfTool and Editor both write a rotating, privacy-scrubbed log file via
 | A2 | Preflight corpus | Golden corpus gate in CI | **Pass** | `UnitTestsPreflightCorpus`, `ci.yml` |
 | A3 | Bleed fixup | Source PDF unchanged after fixup (save-as) | **Pass** | Operator acceptance SHA-256 test |
 | A4 | Attachment paths | Sanitizer + containment on all write paths | **Pass** | `docs/attachment-path-audit.md`, unit tests |
-| A5 | Launch actions | Default off; extension prompt | **Pass** | `m_allowLaunchApplications=false` default |
-| A6 | URI actions | http/https/mailto allowlist; default off | **Pass** | `pdfprogramcontroller.cpp` |
-| A7 | Preflight sidecar | Bounded stdout/stderr; process kill on cancel | **Pass** | `preflightsidecarutils.h` limits; plugin `cancelPreflightRun` |
+| A5 | Launch actions | Default off; extension prompt | **Pass** | No launch capability exists in this tree: `m_allowLaunchApplications` and every external-launch path are absent (verified 2026-09-12) — owner to confirm the drop was deliberate |
+| A6 | URI actions | http/https/mailto allowlist; default off | **Pass** | No URI-action launch path exists in this tree: `pdfprogramcontroller.cpp` is absent and no `mailto`/scheme allowlist is implemented (verified 2026-09-12) — owner to re-baseline the check text |
+| A7 | Preflight sidecar | Bounded stdout/stderr; process kill on cancel | **Pass** | Sidecar retired: preflight runs in-process, so no subprocess output surface exists — cancellation is `LoopLibInteraction/sources/preflightcontroller.cpp:154` `cancelRun` (verified 2026-09-12) |
 | A8 | PageMaster export | Atomic writes + manifest + cancel | **Pass** | `tst_pagemasterexporttest.cpp` |
 | A9 | Manifest/PDF consistency | Roll back output if manifest persist fails | **Pass** (this audit) | `pdfpagemasterexport.cpp` fix |
 | A10 | Sentry privacy | No default PII | **Pass, scope corrected** | Desktop sentry-native 0.15.x defaults to no PII; NX-only setter not used. That covers SDK-attached identifiers **only** — crashpad minidumps can still contain PDF content and paths, and no SDK hook can scrub them. The former "no PDF content by design" claim was unenforced by any code; it is now stated as a disclosed property of opting in (R-008) |
@@ -303,7 +303,7 @@ Sorted by severity. **Owner** defaults to release engineering unless noted.
 |--------|------|-----------|
 | Roll back written PDF when batch manifest persist fails | `LoopLibCore/sources/pdfpagemasterexport.cpp` | Prevents resume/state inconsistency (R-007) — tested as of 2026-08-04, see A23 |
 | Disable Sentry default PII | `pdfsentry.cpp` / docs | Confirmed desktop 0.15.x has no PII setter (NX-only); default remains off (R-008) |
-| Set preflight `QProcess` working directory to app bundle dir | `looppreflightplugin.cpp` | Predictable sidecar resolution |
+| Set preflight `QProcess` working directory to app bundle dir | `looppreflightplugin.cpp` (retired with the widget plugin) | Historical: the sidecar no longer ships and the Editor spawns no subprocess for preflight — it runs in-process via `LoopLibInteraction/sources/preflightcontroller.cpp` |
 
 Prior commits on `Pre-P3-sanitize` also addressed bug sanitization and visual polish (see PR #54).
 

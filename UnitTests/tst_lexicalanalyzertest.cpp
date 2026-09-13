@@ -31,12 +31,14 @@
 #include "pdfdocument.h"
 #include "pdfexception.h"
 #include "pdfjbig2decoder.h"
+#include "pdffont.h"
 
+#include <QElapsedTimer>
 #include <regex>
 
 #ifdef LOOP_COMPILER_MSVC
 #pragma warning(push)
-#pragma warning(disable:4125)
+#pragma warning(disable : 4125)
 #endif
 
 class LexicalAnalyzerTest : public QObject
@@ -65,6 +67,13 @@ private slots:
     void test_stitching_function();
     void test_postscript_function();
     void test_jbig2_arithmetic_decoder();
+    void test_truncatedCMapArrayRangeDoesNotLoop();
+    void test_truncatedCMapRangeOperatorsFailClosed_data();
+    void test_truncatedCMapRangeOperatorsFailClosed();
+    void test_sampledFunctionRejectsMismatchedDomainAndEncodeArity();
+    void test_sampledFunctionRejectsMoreSamplesThanItsStreamContains();
+    void test_sampledFunctionRejectsTooManyDimensions();
+    void test_flateStreamDataLengthProbeIsBounded();
 
 private:
     void scanWholeStream(const char* stream);
@@ -75,12 +84,10 @@ private:
 
 LexicalAnalyzerTest::LexicalAnalyzerTest()
 {
-
 }
 
 LexicalAnalyzerTest::~LexicalAnalyzerTest()
 {
-
 }
 
 void LexicalAnalyzerTest::test_null()
@@ -102,7 +109,7 @@ void LexicalAnalyzerTest::test_numbers()
     using Type = pdf::PDFLexicalAnalyzer::TokenType;
 
     testTokens("1 +2 -3 +40 -55", { Token(Type::Integer, 1), Token(Type::Integer, 2), Token(Type::Integer, -3), Token(Type::Integer, 40), Token(Type::Integer, -55) });
-    testTokens(".0 0.1 3.5 -4. +5.0 -6.58 7.478", { Token(Type::Real, 0.0),  Token(Type::Real, 0.1),  Token(Type::Real, 3.5),  Token(Type::Real, -4.0),  Token(Type::Real, 5.0),  Token(Type::Real, -6.58),  Token(Type::Real, 7.478) });
+    testTokens(".0 0.1 3.5 -4. +5.0 -6.58 7.478", { Token(Type::Real, 0.0), Token(Type::Real, 0.1), Token(Type::Real, 3.5), Token(Type::Real, -4.0), Token(Type::Real, 5.0), Token(Type::Real, -6.58), Token(Type::Real, 7.478) });
     testTokens("1000000000000000000000000000", { Token(Type::Real, 1e27) });
 }
 
@@ -255,37 +262,36 @@ void LexicalAnalyzerTest::test_parser_security_limits()
     excessiveNesting.append(QByteArray(300, ']'));
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        pdf::PDFParser parser(excessiveNesting, nullptr, pdf::PDFParser::None);
-        parser.getObject();
-    });
+                             {
+                                 pdf::PDFParser parser(excessiveNesting, nullptr, pdf::PDFParser::None);
+                                 parser.getObject();
+                             });
 
     pdf::PDFParsingContext referenceContext([](pdf::PDFParsingContext* context, pdf::PDFObjectReference reference)
-    {
+                                            {
         pdf::PDFParsingContext::PDFParsingContextGuard guard(context, reference);
         if (reference.objectNumber >= 300)
         {
             return pdf::PDFObject::createNull();
         }
 
-        return context->getObject(pdf::PDFObject::createReference(pdf::PDFObjectReference(reference.objectNumber + 1, 0)));
-    });
+        return context->getObject(pdf::PDFObject::createReference(pdf::PDFObjectReference(reference.objectNumber + 1, 0))); });
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
                              referenceContext.getObject(pdf::PDFObject::createReference(pdf::PDFObjectReference(1, 0))));
 
     const QByteArray externalStream = "<< /Length 1 /F (controlled-proof.txt) >> stream\nX endstream";
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        pdf::PDFParser parser(externalStream, nullptr, pdf::PDFParser::AllowStreams);
-        parser.getObject();
-    });
+                             {
+                                 pdf::PDFParser parser(externalStream, nullptr, pdf::PDFParser::AllowStreams);
+                                 parser.getObject();
+                             });
 }
 
 void LexicalAnalyzerTest::test_header_regexp()
 {
     std::regex regex(pdf::PDF_FILE_HEADER_REGEXP);
 
-    for (const char* string : { "%PDF-1.4", "   %PDF-1.4abs", "%PDF-1.4", "%test %PDF %PDF-1.4", "%!PS-Adobe-3.0 PDF-1.4"})
+    for (const char* string : { "%PDF-1.4", "   %PDF-1.4abs", "%PDF-1.4", "%test %PDF %PDF-1.4", "%!PS-Adobe-3.0 PDF-1.4" })
     {
         std::cmatch cmatch;
         const bool matched = std::regex_search(string, string + strlen(string), cmatch, regex);
@@ -320,8 +326,8 @@ void LexicalAnalyzerTest::test_flat_map()
         int order = 0;
         for (int i = 0; i < count; ++i)
         {
-            items.emplace_back(Item{order++, i, false});
-            items.emplace_back(Item{order++, i, true});
+            items.emplace_back(Item{ order++, i, false });
+            items.emplace_back(Item{ order++, i, true });
         }
 
         do
@@ -360,10 +366,40 @@ void LexicalAnalyzerTest::test_lzw_filter()
     // This example is from PDF 1.7 Reference
     QByteArray byteArray = QByteArray::fromHex("800B6050220C0C8501");
     pdf::PDFLzwDecodeFilter filter;
-    QByteArray decoded = filter.apply(byteArray, [](const pdf::PDFObject& object) -> const pdf::PDFObject& { return object; }, pdf::PDFObject(), nullptr);
+    QByteArray decoded = filter.apply(byteArray, [](const pdf::PDFObject& object) -> const pdf::PDFObject&
+                                      { return object; }, pdf::PDFObject(), nullptr);
     QByteArray valid = "-----A---B";
 
     QCOMPARE(decoded, valid);
+}
+
+void LexicalAnalyzerTest::test_flateStreamDataLengthProbeIsBounded()
+{
+    // The probe exists only to recover an inline image's length. 1 MiB of zeros
+    // compresses to ~1 KiB, i.e. a ~1000:1 expansion, far past the 256x ratio
+    // ceiling the decode path itself enforces - the probe used to inflate the
+    // whole thing anyway, unbounded and uncancellable.
+    //
+    // qCompress() prepends a four-byte uncompressed-size header, but the probe
+    // hands its input straight to inflate(), which expects the zlib header at
+    // offset 0; with the prefix left on, inflate() fails on the header and the
+    // probe returns -1 for the wrong reason (measured), so the fixture strips it.
+    QByteArray zeros(1024 * 1024, '\0');
+    const QByteArray bomb = qCompress(zeros, 9).mid(4);
+
+    pdf::PDFFlateDecodeFilter filter;
+
+    QElapsedTimer timer;
+    timer.start();
+    const pdf::PDFInteger probedLength = filter.getStreamDataLength(bomb, 0);
+    const qint64 elapsed = timer.elapsed();
+
+    QVERIFY2(probedLength == -1, qPrintable(QStringLiteral("the probe must refuse an over-ceiling stream, got %1").arg(probedLength)));
+    QVERIFY2(elapsed < 2000, "the probe must stop at its ceiling, not at the end of the stream");
+
+    // A stream inside the ratio ceiling still probes normally.
+    const QByteArray small = qCompress(QByteArray("0123456789"), 9).mid(4);
+    QVERIFY(filter.getStreamDataLength(small, 0) > 0);
 }
 
 void LexicalAnalyzerTest::test_sampled_function()
@@ -393,7 +429,7 @@ void LexicalAnalyzerTest::test_sampled_function()
 
         auto apply = [&function](pdf::PDFReal x, pdf::PDFReal y) -> pdf::PDFReal
         {
-            pdf::PDFReal values[2] = {x, y};
+            pdf::PDFReal values[2] = { x, y };
             pdf::PDFReal output = -1.0;
             function->apply(values, values + std::size(values), &output, &output + 1);
             return output;
@@ -479,192 +515,192 @@ void LexicalAnalyzerTest::test_sampled_function()
 
     // Test invalid inputs
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Range [ 0 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 2 "
-                            " >> "
-                            " stream\n\000\377 endstream ";
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 2 "
+                                                     " >> "
+                                                     " stream\n\000\377 endstream ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    // Test invalid inputs
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Range [ 0 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample -5 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     // Test invalid inputs
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 ] "
-                            "     /Range [ 0 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample -5 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    // Test invalid inputs
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Range [ 0 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     // Test invalid inputs
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Range [ 0 1 ] "
-                            "     /Size [ 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 ] "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    // Test invalid inputs
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Range [ 0 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /Encode [ 1 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     // Test invalid inputs
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Range [ 0 1 ] "
-                            "     /Decode [ 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Range [ 0 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    // Test invalid inputs
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Domain [ 0 1 0 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     // Test invalid inputs
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        const char data[] = " << "
-                            "     /FunctionType 0 "
-                            "     /Range [ 0 1 ] "
-                            "     /Size [ 2 2 ] "
-                            "     /BitsPerSample 8 "
-                            "     /Order 1 "
-                            "     /Length 4 "
-                            " >> "
-                            " stream\n\000\377\200\300 endstream ";
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Size [ 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
+
+    // Test invalid inputs
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /Encode [ 1 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
+
+    // Test invalid inputs
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Decode [ 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
+
+    // Test invalid inputs
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Domain [ 0 1 0 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
+
+    // Test invalid inputs
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 const char data[] = " << "
+                                                     "     /FunctionType 0 "
+                                                     "     /Range [ 0 1 ] "
+                                                     "     /Size [ 2 2 ] "
+                                                     "     /BitsPerSample 8 "
+                                                     "     /Order 1 "
+                                                     "     /Length 4 "
+                                                     " >> "
+                                                     " stream\n\000\377\200\300 endstream ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
 }
 
 void LexicalAnalyzerTest::test_exponential_function()
@@ -760,7 +796,7 @@ void LexicalAnalyzerTest::test_exponential_function()
             const double expected1 = std::pow(qBound(0.0, value, 2.0), 2.0);
             const double expected2 = qBound(-4.0, 1.0 - std::pow(qBound(0.0, value, 2.0), 2.0), 4.0);
 
-            double actual[2] = { };
+            double actual[2] = {};
             QVERIFY(function->apply(&value, &value + 1, actual, actual + std::size(actual)));
             QVERIFY(qFuzzyCompare(expected1, actual[0]));
             QVERIFY(qFuzzyCompare(expected2, actual[1]));
@@ -769,134 +805,134 @@ void LexicalAnalyzerTest::test_exponential_function()
 
     // Test invalid inputs
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ 0 ] "
-                          "     /Range [ 0 2 ] "
-                          "     /N 1.0 "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ 0 ] "
+                                                   "     /Range [ 0 2 ] "
+                                                   "     /N 1.0 "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ -1 2 ] "
-                          "     /N -1.0 "
-                          " >> ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ 0 2 ] "
-                          "     /N -1.0 "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ -1 2 ] "
+                                                   "     /N -1.0 "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ -1 2 ] "
-                          "     /N 3.4 "
-                          " >> ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ 0 2 2 0] "
-                          "     /Range [ 0 4 -4 4 ] "
-                          "     /C0 [ 0.0 1.0 ] "
-                          "     /C1 [ 1.0 0.0 ] "
-                          "     /N 2.0 "
-                                      " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ 0 2 ] "
+                                                   "     /N -1.0 "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ 0 2 ] "
-                          "     /C0 [ 0.0 1.0 3.0 ] "
-                          "     /C1 [ 1.0 0.0 ] "
-                          "     /N 2.0 "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ -1 2 ] "
+                                                   "     /N 3.4 "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain [ 0 2 ] "
-                          "     /C0 [ 0.0 ] "
-                          "     /C1 [ 1.0 0.0 ] "
-                          "     /N 2.0 "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ 0 2 2 0] "
+                                                   "     /Range [ 0 4 -4 4 ] "
+                                                   "     /C0 [ 0.0 1.0 ] "
+                                                   "     /C1 [ 1.0 0.0 ] "
+                                                   "     /N 2.0 "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 2 "
-                          "     /Domain /Something "
-                          "     /C0 [ 0.0 ] "
-                          "     /C1 [ 1.0 0.0 ] "
-                          "     /N 2.0 "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ 0 2 ] "
+                                                   "     /C0 [ 0.0 1.0 3.0 ] "
+                                                   "     /C1 [ 1.0 0.0 ] "
+                                                   "     /N 2.0 "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain [ 0 2 ] "
+                                                   "     /C0 [ 0.0 ] "
+                                                   "     /C1 [ 1.0 0.0 ] "
+                                                   "     /N 2.0 "
+                                                   " >> ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 2 "
+                                                   "     /Domain /Something "
+                                                   "     /C0 [ 0.0 ] "
+                                                   "     /C1 [ 1.0 0.0 ] "
+                                                   "     /N 2.0 "
+                                                   " >> ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
 }
 
 void LexicalAnalyzerTest::test_stitching_function()
@@ -927,87 +963,87 @@ void LexicalAnalyzerTest::test_stitching_function()
     }
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 3 "
-                          "     /Domain [ 0 1 ] "
-                          "     /Bounds [ 0.5 ] "
-                          "     /Encode [ 0 0.5 0.5 ] "
-                          "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 3 "
+                                                   "     /Domain [ 0 1 ] "
+                                                   "     /Bounds [ 0.5 ] "
+                                                   "     /Encode [ 0 0.5 0.5 ] "
+                                                   "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 3 "
-                          "     /Domain [ 0 ] "
-                          "     /Bounds [ 0.5 ] "
-                          "     /Encode [ 0 0.5 0.5 1.0 ] "
-                          "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
-                          " >> ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 3 "
-                          "     /Domain [ 0 1 ] "
-                          "     /Bounds [ 0.5 0.5 ] "
-                          "     /Encode [ 0 0.5 0.5 1.0 ] "
-                          "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 3 "
+                                                   "     /Domain [ 0 ] "
+                                                   "     /Bounds [ 0.5 ] "
+                                                   "     /Encode [ 0 0.5 0.5 1.0 ] "
+                                                   "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-    });
-
-    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 3 "
-                          "     /Domain [ 0 1 ] "
-                          "     /Encode [ 0 0.5 0.5 1.0 ] "
-                          "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
-                          " >> ";
-
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
-
-        QVERIFY(!function);
-    });
+                                 QVERIFY(!function);
+                             });
 
     QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
-    {
-        QByteArray data = " << "
-                          "     /FunctionType 3 "
-                          "     /Domain [ 0 1 ] "
-                          "     /Bounds [ 0.5 ] "
-                          "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
-                          " >> ";
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 3 "
+                                                   "     /Domain [ 0 1 ] "
+                                                   "     /Bounds [ 0.5 0.5 ] "
+                                                   "     /Encode [ 0 0.5 0.5 1.0 ] "
+                                                   "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
+                                                   " >> ";
 
-        pdf::PDFDocument document;
-        pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
-        pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
 
-        QVERIFY(!function);
-                });
+                                 QVERIFY(!function);
+                             });
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 3 "
+                                                   "     /Domain [ 0 1 ] "
+                                                   "     /Encode [ 0 0.5 0.5 1.0 ] "
+                                                   "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
+                                                   " >> ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException,
+                             {
+                                 QByteArray data = " << "
+                                                   "     /FunctionType 3 "
+                                                   "     /Domain [ 0 1 ] "
+                                                   "     /Bounds [ 0.5 ] "
+                                                   "     /Functions [ /Identity << /FunctionType 2 /Domain [ 0.5 1.0 ] /N 2.0 >> ] "
+                                                   " >> ";
+
+                                 pdf::PDFDocument document;
+                                 pdf::PDFParser parser(data, nullptr, pdf::PDFParser::None);
+                                 pdf::PDFFunctionPtr function = pdf::PDFFunction::createFunction(&document, parser.getObject());
+
+                                 QVERIFY(!function);
+                             });
 }
 
 void LexicalAnalyzerTest::test_postscript_function()
@@ -1018,10 +1054,11 @@ void LexicalAnalyzerTest::test_postscript_function()
         QDataStream dataStream(&result, QIODevice::WriteOnly);
 
         QByteArray dictionaryData = (QString(" << /FunctionType 4 ") +
-                                    QString(" /Domain [ %1 %2 ] ").arg(xMin).arg(xMax) +
-                                    QString(" /Range [ %1 %2 ] ").arg(yMin).arg(yMax) +
-                                    QString(" /Length %1 ").arg(std::strlen(stream)) +
-                                    QString(">> stream\n")).toLocal8Bit();
+                                     QString(" /Domain [ %1 %2 ] ").arg(xMin).arg(xMax) +
+                                     QString(" /Range [ %1 %2 ] ").arg(yMin).arg(yMax) +
+                                     QString(" /Length %1 ").arg(std::strlen(stream)) +
+                                     QString(">> stream\n"))
+                                        .toLocal8Bit();
         QByteArray remainder = " endstream";
 
         dataStream.writeRawData(dictionaryData.constBegin(), dictionaryData.size());
@@ -1067,44 +1104,235 @@ void LexicalAnalyzerTest::test_postscript_function()
         }
     };
 
-    test01("dup mul", [](double x) { return x * x; });
-    test01("1.0 exch sub", [](double x) { return 1.0 - x; });
-    test01("dup add", [](double x) { return qBound(0.0, x + x, 1.0); });
-    test01("dup 1.0 add div", [](double x) { return x / (1.0 + x); });
-    test01("100.0 mul cvi 10 idiv cvr 10.0 div", [](double x) { return static_cast<double>(static_cast<int>(x * 100.0) / 10) / 10.0; });
-    test01("100.0 mul cvi 2 mod cvr 0.5 mul", [](double x) { return (static_cast<int>(x * 100.0) % 2) * 0.5; });
-    test01("neg 1.0 exch add", [](double x) { return 1.0 - x; });
-    test01("neg 0.5 add abs", [](double x) { return std::abs(0.5 - x); });
-    test01("10.0 mul ceiling 10.0 div", [](double x) { return std::ceil(10.0 * x) / 10.0; });
-    test01("10.0 mul floor 10.0 div", [](double x) { return std::floor(10.0 * x) / 10.0; });
-    test01("10.0 mul round 10.0 div", [](double x) { return std::round(10.0 * x) / 10.0; });
-    test01("10.0 mul truncate 10.0 div", [](double x) { return std::trunc(10.0 * x) / 10.0; });
-    test01("sqrt", [](double x) { return std::sqrt(x); });
-    test01("360.0 mul sin 2 div 0.5 add", [](double x) { return std::sin(qDegreesToRadians(360.0 * x)) / 2.0 + 0.5; });
-    test01("360.0 mul cos 2 div 0.5 add", [](double x) { return std::cos(qDegreesToRadians(360.0 * x)) / 2.0 + 0.5; });
-    test01("0.2 atan 360.0 div", [](double x) { return qBound(0.0, qRadiansToDegrees(qAtan2(x, 0.2)) / 360.0, 1.0); });
-    test01("0.5 exp", [](double x) { return std::sqrt(x); });
-    test01("2 exp", [](double x) { return x * x; });
-    test01("1 add ln", [](double x) { return std::log(1 + x); });
-    test01("1 add log", [](double x) { return std::log10(1 + x); });
-    test01("dup 0.5 gt { 1.0 exch sub } if", [](double x) { return (x > 0.5) ? (1.0 - x) : x; });
-    test01("dup 0.5 gt { 1.0 exch sub } { 2.0 mul } ifelse", [](double x) { return (x > 0.5) ? (1.0 - x) : (2.0 * x); });
-    test01("0.0 eq { 1.0 } { 0.0 } ifelse", [](double x) { return (x == 0.0) ? 1.0 : 0.0; });
-    test01("0.0 ne { 1.0 } { 0.0 } ifelse", [](double x) { return (x != 0.0) ? 1.0 : 0.0; });
-    test01("0.5 ge { 1.0 } { 0.0 } ifelse", [](double x) { return (x >= 0.5) ? 1.0 : 0.0; });
-    test01("0.5 gt { 1.0 } { 0.0 } ifelse", [](double x) { return (x > 0.5) ? 1.0 : 0.0; });
-    test01("0.5 le { 1.0 } { 0.0 } ifelse", [](double x) { return (x <= 0.5) ? 1.0 : 0.0; });
-    test01("0.5 lt { 1.0 } { 0.0 } ifelse", [](double x) { return (x < 0.5) ? 1.0 : 0.0; });
-    test01("dup 0.25 gt exch 0.75 lt and { 1.0 } { 0.0 } ifelse", [](double x) { return (x > 0.25 && x < 0.75) ? 1.0 : 0.0; });
-    test01("dup 0.25 le exch 0.75 ge or { 1.0 } { 0.0 } ifelse", [](double x) { return !(x > 0.25 && x < 0.75) ? 1.0 : 0.0; });
-    test01("pop true false xor { 1.0 } { 0.0 } ifelse", [](double) { return 1.0; });
-    test01("pop true false xor not { 0.0 } { 1.0 } ifelse", [](double) { return 1.0; });
-    test01("1 2 bitshift cvr div", [](double x) { return x / 4.0; });
-    test01("16 -2 bitshift cvr div", [](double x) { return x / 4.0; });
-    test01("pop 4 3 2 1   3 1 roll 2 eq { 3 eq { 1 eq { 4 eq { 1.0 } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse", [](double) { return 1.0; }); // we should have 4 1 3 2
-    test01("pop 4 3 2 1   3 -1 roll 3 eq { 1 eq { 2 eq { 4 eq { 1.0 } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse", [](double) { return 1.0; }); // we should have 4 2 1 3
-    test01("2.0 2 copy div 3 1 roll exp add", [](double x) { return qBound(0.0, 0.5 * x + std::pow(x, 2.0), 1.0); });
-    test01("2.0 1 index exch div exch pop", [](double x) { return x / 2.0; });
+    test01("dup mul", [](double x)
+           { return x * x; });
+    test01("1.0 exch sub", [](double x)
+           { return 1.0 - x; });
+    test01("dup add", [](double x)
+           { return qBound(0.0, x + x, 1.0); });
+    test01("dup 1.0 add div", [](double x)
+           { return x / (1.0 + x); });
+    test01("100.0 mul cvi 10 idiv cvr 10.0 div", [](double x)
+           { return static_cast<double>(static_cast<int>(x * 100.0) / 10) / 10.0; });
+    test01("100.0 mul cvi 2 mod cvr 0.5 mul", [](double x)
+           { return (static_cast<int>(x * 100.0) % 2) * 0.5; });
+    test01("neg 1.0 exch add", [](double x)
+           { return 1.0 - x; });
+    test01("neg 0.5 add abs", [](double x)
+           { return std::abs(0.5 - x); });
+    test01("10.0 mul ceiling 10.0 div", [](double x)
+           { return std::ceil(10.0 * x) / 10.0; });
+    test01("10.0 mul floor 10.0 div", [](double x)
+           { return std::floor(10.0 * x) / 10.0; });
+    test01("10.0 mul round 10.0 div", [](double x)
+           { return std::round(10.0 * x) / 10.0; });
+    test01("10.0 mul truncate 10.0 div", [](double x)
+           { return std::trunc(10.0 * x) / 10.0; });
+    test01("sqrt", [](double x)
+           { return std::sqrt(x); });
+    test01("360.0 mul sin 2 div 0.5 add", [](double x)
+           { return std::sin(qDegreesToRadians(360.0 * x)) / 2.0 + 0.5; });
+    test01("360.0 mul cos 2 div 0.5 add", [](double x)
+           { return std::cos(qDegreesToRadians(360.0 * x)) / 2.0 + 0.5; });
+    test01("0.2 atan 360.0 div", [](double x)
+           { return qBound(0.0, qRadiansToDegrees(qAtan2(x, 0.2)) / 360.0, 1.0); });
+    test01("0.5 exp", [](double x)
+           { return std::sqrt(x); });
+    test01("2 exp", [](double x)
+           { return x * x; });
+    test01("1 add ln", [](double x)
+           { return std::log(1 + x); });
+    test01("1 add log", [](double x)
+           { return std::log10(1 + x); });
+    test01("dup 0.5 gt { 1.0 exch sub } if", [](double x)
+           { return (x > 0.5) ? (1.0 - x) : x; });
+    test01("dup 0.5 gt { 1.0 exch sub } { 2.0 mul } ifelse", [](double x)
+           { return (x > 0.5) ? (1.0 - x) : (2.0 * x); });
+    test01("0.0 eq { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x == 0.0) ? 1.0 : 0.0; });
+    test01("0.0 ne { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x != 0.0) ? 1.0 : 0.0; });
+    test01("0.5 ge { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x >= 0.5) ? 1.0 : 0.0; });
+    test01("0.5 gt { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x > 0.5) ? 1.0 : 0.0; });
+    test01("0.5 le { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x <= 0.5) ? 1.0 : 0.0; });
+    test01("0.5 lt { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x < 0.5) ? 1.0 : 0.0; });
+    test01("dup 0.25 gt exch 0.75 lt and { 1.0 } { 0.0 } ifelse", [](double x)
+           { return (x > 0.25 && x < 0.75) ? 1.0 : 0.0; });
+    test01("dup 0.25 le exch 0.75 ge or { 1.0 } { 0.0 } ifelse", [](double x)
+           { return !(x > 0.25 && x < 0.75) ? 1.0 : 0.0; });
+    test01("pop true false xor { 1.0 } { 0.0 } ifelse", [](double)
+           { return 1.0; });
+    test01("pop true false xor not { 0.0 } { 1.0 } ifelse", [](double)
+           { return 1.0; });
+    test01("1 2 bitshift cvr div", [](double x)
+           { return x / 4.0; });
+    test01("16 -2 bitshift cvr div", [](double x)
+           { return x / 4.0; });
+    test01("pop 4 3 2 1   3 1 roll 2 eq { 3 eq { 1 eq { 4 eq { 1.0 } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse", [](double)
+           { return 1.0; });   // we should have 4 1 3 2
+    test01("pop 4 3 2 1   3 -1 roll 3 eq { 1 eq { 2 eq { 4 eq { 1.0 } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse } { 0.0 } ifelse", [](double)
+           { return 1.0; });   // we should have 4 2 1 3
+    test01("2.0 2 copy div 3 1 roll exp add", [](double x)
+           { return qBound(0.0, 0.5 * x + std::pow(x, 2.0), 1.0); });
+    test01("2.0 1 index exch div exch pop", [](double x)
+           { return x / 2.0; });
+}
+
+void LexicalAnalyzerTest::test_truncatedCMapArrayRangeDoesNotLoop()
+{
+    // A nested array inside beginbfrange that is never closed. This is the one
+    // range loop that is genuinely unbounded today: its token comes from
+    // fetchUnicode(), which returns 0 for anything that is not a 2-byte string
+    // and never throws, so at the end of the buffer it spins on EndOfFile
+    // forever and appends one entry per iteration until the process is killed.
+    const QByteArray truncated = "1 beginbfrange\n<0000> <00FF> [\n";
+
+    QElapsedTimer timer;
+    timer.start();
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException, pdf::PDFFontCMap::createFromData(truncated));
+
+    // Fail-closed is not enough: it must also fail fast. Pre-fix this call never
+    // returns at all.
+    QVERIFY2(timer.elapsed() < 2000, "a truncated CMap array range must be rejected immediately");
+}
+
+void LexicalAnalyzerTest::test_truncatedCMapRangeOperatorsFailClosed_data()
+{
+    QTest::addColumn<QByteArray>("cmap");
+    QTest::addColumn<QByteArray>("operatorName");
+
+    // Each fixture opens a range operator with a well-formed first entry and no
+    // terminator. Pre-fix these loops stop only because fetchCode()/fetchCID()
+    // throw on the EndOfFile token they are handed; the fix makes the failure
+    // deliberate and names the operator that was left open.
+    QTest::newRow("begincidrange") << QByteArray("1 begincidrange\n<0000> <00FF> 1\n") << QByteArray("begincidrange");
+    QTest::newRow("begincidchar") << QByteArray("1 begincidchar\n<0000> 1\n") << QByteArray("begincidchar");
+    QTest::newRow("beginbfchar") << QByteArray("1 beginbfchar\n<0000> <0041>\n") << QByteArray("beginbfchar");
+    QTest::newRow("beginbfrange") << QByteArray("1 beginbfrange\n<0000> <00FF> <0041>\n") << QByteArray("beginbfrange");
+}
+
+void LexicalAnalyzerTest::test_truncatedCMapRangeOperatorsFailClosed()
+{
+    QFETCH(QByteArray, cmap);
+    QFETCH(QByteArray, operatorName);
+
+    bool threw = false;
+    QString message;
+    try
+    {
+        pdf::PDFFontCMap::createFromData(cmap);
+    }
+    catch (const pdf::PDFException& e)
+    {
+        threw = true;
+        message = e.getMessage();
+    }
+
+    QVERIFY2(threw, "a truncated CMap range operator must be rejected, not silently accepted");
+    QVERIFY2(message.contains(QStringLiteral("not terminated")) && message.contains(QString::fromLatin1(operatorName)),
+             qPrintable(message));
+}
+
+void LexicalAnalyzerTest::test_sampledFunctionRejectsMismatchedDomainAndEncodeArity()
+{
+    // /Size has two dimensions, so Domain/Encode must both carry 2 * 2 = 4
+    // numbers. The old check only compared Domain.size() with Encode.size(), so
+    // this dictionary passed validation and apply() then indexed
+    // m_domain[2], m_domain[3], m_encoder[2], m_encoder[3] past the end of two
+    // vectors - an out-of-bounds read in a release build, where the
+    // PDFSampledFunction Q_ASSERTs do not exist.
+    const char data[] = " << "
+                        "     /FunctionType 0 "
+                        "     /Domain [ 0 1 ] "
+                        "     /Encode [ 0 1 ] "
+                        "     /Range [ 0 1 ] "
+                        "     /Size [ 2 2 ] "
+                        "     /BitsPerSample 8 "
+                        "     /Order 1 "
+                        "     /Length 4 "
+                        " >> "
+                        " stream\n\000\377\200\300 endstream ";
+
+    pdf::PDFDocument document;
+    pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException, pdf::PDFFunction::createFunction(&document, parser.getObject()));
+}
+
+void LexicalAnalyzerTest::test_sampledFunctionRejectsMoreSamplesThanItsStreamContains()
+{
+    // Four streamed bytes cannot satisfy /Size [ 1000000 1000000 ] with 8-bit
+    // samples. The old code called samples.resize(10^12) before reading a single
+    // sample, so a ~100-byte file asked for an 8 TB allocation; the failure must
+    // be decided from the declared count and the stream size, before resize().
+    const char data[] = " << "
+                        "     /FunctionType 0 "
+                        "     /Domain [ 0 1 0 1 ] "
+                        "     /Range [ 0 1 ] "
+                        "     /Size [ 1000000 1000000 ] "
+                        "     /BitsPerSample 8 "
+                        "     /Order 1 "
+                        "     /Length 4 "
+                        " >> "
+                        " stream\n\000\377\200\300 endstream ";
+
+    pdf::PDFDocument document;
+    pdf::PDFParser parser(data, data + std::size(data), nullptr, pdf::PDFParser::AllowStreams);
+
+    bool threw = false;
+    QString message;
+    try
+    {
+        pdf::PDFFunction::createFunction(&document, parser.getObject());
+    }
+    catch (const pdf::PDFException& e)
+    {
+        threw = true;
+        message = e.getMessage();
+    }
+
+    QVERIFY2(threw, "a sampled function must not size its sample vector from a hostile /Size");
+    QVERIFY2(message.contains(QStringLiteral("samples")), qPrintable(message));
+}
+
+void LexicalAnalyzerTest::test_sampledFunctionRejectsTooManyDimensions()
+{
+    // PDFSampledFunction allocates 1 << m hypercube offset entries and, per
+    // apply() call, a 1 << m sample buffer. The old code accepted up to m == 30
+    // (checked only after the samples were read), so 2^30 four-byte offsets - a
+    // multi-gigabyte allocation - came from a few hundred bytes of input. No
+    // real sampled function approaches 20 dimensions.
+    const auto repeatedInteger = [](int count, const char* value)
+    {
+        QByteArray text("[");
+        for (int i = 0; i < count; ++i)
+        {
+            text.append(' ');
+            text.append(value);
+        }
+        text.append(" ]");
+        return text;
+    };
+
+    // The stream bytes are appended separately: a QByteArray built from a string
+    // literal stops at the embedded NUL byte, which would truncate the document
+    // before its stream data and make the parser fail before the sampled function
+    // is ever constructed.
+    QByteArray data = QByteArray(" << /FunctionType 0 /Domain ") + repeatedInteger(21 * 2, "0") +
+                      QByteArray(" /Range [ 0 1 ] /Size ") + repeatedInteger(21, "1") +
+                      QByteArray(" /BitsPerSample 8 /Order 1 /Length 1 >> stream\n");
+    data.append('\0');
+    data.append(" endstream ");
+
+    pdf::PDFDocument document;
+    pdf::PDFParser parser(data.constData(), data.constData() + data.size(), nullptr, pdf::PDFParser::AllowStreams);
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFException, pdf::PDFFunction::createFunction(&document, parser.getObject()));
 }
 
 void LexicalAnalyzerTest::test_jbig2_arithmetic_decoder()
@@ -1123,20 +1351,20 @@ void LexicalAnalyzerTest::test_jbig2_arithmetic_decoder()
     state.reset(1);
     std::vector<uint8_t> decompressedByAD;
     decompressedByAD.reserve(decompressed.size());
-/*
-    for (size_t i = 0; i < decompressed.size() * 8; ++i)
-    {
-        uint32_t Qe = state.getQe(0);
-        uint8_t MPS = state.getMPS(0);
-        qDebug() << (i - 1) << ", Qe = " << qPrintable(QString("0x%1").arg(Qe, 8, 16, QChar(' '))) << ", MPS = " << MPS <<
-                    ", A = " << qPrintable(QString("0x%1").arg(decoder.getRegisterA(), 8, 16, QChar(' '))) << ", CT = " << decoder.getRegisterCT() <<
-                    ", C = " <<  qPrintable(QString("0x%1").arg(decoder.getRegisterC(), 8, 16, QChar(' '))) ;
-        decoder.readBit(0, &state);
-    }
+    /*
+        for (size_t i = 0; i < decompressed.size() * 8; ++i)
+        {
+            uint32_t Qe = state.getQe(0);
+            uint8_t MPS = state.getMPS(0);
+            qDebug() << (i - 1) << ", Qe = " << qPrintable(QString("0x%1").arg(Qe, 8, 16, QChar(' '))) << ", MPS = " << MPS <<
+                        ", A = " << qPrintable(QString("0x%1").arg(decoder.getRegisterA(), 8, 16, QChar(' '))) << ", CT = " << decoder.getRegisterCT() <<
+                        ", C = " <<  qPrintable(QString("0x%1").arg(decoder.getRegisterC(), 8, 16, QChar(' '))) ;
+            decoder.readBit(0, &state);
+        }
 
-    reader.seek(0);
-    state.reset(1);
-    decoder.initialize();*/
+        reader.seek(0);
+        state.reset(1);
+        decoder.initialize();*/
 
     for (size_t i = 0; i < decompressed.size(); ++i)
     {

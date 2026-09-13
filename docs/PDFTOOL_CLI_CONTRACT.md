@@ -131,13 +131,38 @@ PdfTool diff old.pdf new.pdf --console-format json
 - `code`: stable kebab-case identifier, e.g. `cli.invalid-arguments`,
   `cli.unknown-command`, `pdf.document-unreadable`, `pdf.invalid-password`,
   `pdf.reader-warning`, `output.already-exists`, `output.write-failed`,
-  `operation.cancelled`. Machine consumers branch on these codes; treat them as
-  the stability contract. `message` is human-oriented and may change.
+  `output.empty-result`, `operation.cancelled`. Machine consumers branch on
+  these codes; treat them as the stability contract. `message` is
+  human-oriented and may change.
 - `context`: optional free-form object (e.g. the offending path).
 
 In JSON mode, handled errors and warnings are captured in `diagnostics` and are
 **not** additionally written to stderr. In text/XML/HTML mode the existing
 human-facing stderr behavior is preserved.
+
+### Empty results
+
+Extraction commands (`fetch-images`, `fetch-text`, `attachments`) complete
+successfully when a document simply has nothing to extract - a vector-only page
+has no images, a scanned page has no text. That case always records an
+`output.empty-result` diagnostic whose `context` carries `subject` (what was not
+produced) and `fail_if_empty` (whether the caller asked to fail on it):
+
+```json
+{
+  "severity": "info",
+  "code": "output.empty-result",
+  "message": "No images were extracted from document 'vector-only.pdf'.",
+  "context": { "subject": "images", "fail_if_empty": false }
+}
+```
+
+By default the note is informational and the command still exits `0 success`,
+because "this document has no figures" is a legitimate answer. Passing
+`--fail-if-empty` raises the same diagnostic to `error` and exits
+`1 findings`, so a pipeline that gates on "figures were produced" cannot be
+green-lit by an empty output directory. The flag never changes which files are
+written; it only chooses how an empty result is reported.
 
 ## Output records
 

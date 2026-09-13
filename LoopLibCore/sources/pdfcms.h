@@ -37,6 +37,8 @@
 namespace pdf
 {
 
+class PDFProcessingBudget;
+
 /// This simple structure stores settings for color management system, and what
 /// color management system should be used. At default, two color management
 /// system are available - generic (which uses default imprecise color management),
@@ -82,13 +84,13 @@ struct PDFCMSSettings
     bool isGamutChecking = false;
     bool isSoftProofing = false;
     bool isConsiderOutputIntent = true;
-    QColor outOfGamutColor = Qt::red; ///< Color, which marks out-of-gamut when soft-proofing is proceeded
-    QString outputCS;               ///< Output (rendering) color space
-    QString deviceGray;             ///< Identifiers for color space (device gray)
-    QString deviceRGB;              ///< Identifiers for color space (device RGB)
-    QString deviceCMYK;             ///< Identifiers for color space (device CMYK)
-    QString softProofingProfile;    ///< Identifiers for soft proofing profile
-    QString profileDirectory;       ///< Directory containing color profiles
+    QColor outOfGamutColor = Qt::red;   ///< Color, which marks out-of-gamut when soft-proofing is proceeded
+    QString outputCS;   ///< Output (rendering) color space
+    QString deviceGray;   ///< Identifiers for color space (device gray)
+    QString deviceRGB;   ///< Identifiers for color space (device RGB)
+    QString deviceCMYK;   ///< Identifiers for color space (device CMYK)
+    QString softProofingProfile;   ///< Identifiers for soft proofing profile
+    QString profileDirectory;   ///< Directory containing color profiles
 
     // Postprocessing
     QColor foregroundColor = Qt::green;
@@ -281,7 +283,7 @@ public:
     virtual QColor getColorFromDeviceRGB(const PDFColor& color, RenderingIntent intent, PDFRenderErrorReporter* reporter) const override;
     virtual QColor getColorFromDeviceCMYK(const PDFColor& color, RenderingIntent intent, PDFRenderErrorReporter* reporter) const override;
     virtual QColor getColorFromXYZ(const PDFColor3& whitePoint, const PDFColor3& color, RenderingIntent intent, PDFRenderErrorReporter* reporter) const override;
-    virtual QColor getColorFromICC(const PDFColor& color, RenderingIntent renderingIntent,  const QByteArray& iccID, const QByteArray& iccData, PDFRenderErrorReporter* reporter) const override;
+    virtual QColor getColorFromICC(const PDFColor& color, RenderingIntent renderingIntent, const QByteArray& iccID, const QByteArray& iccData, PDFRenderErrorReporter* reporter) const override;
     virtual bool fillRGBBufferFromDeviceGray(const std::vector<float>& colors, RenderingIntent intent, unsigned char* outputBuffer, PDFRenderErrorReporter* reporter) const override;
     virtual bool fillRGBBufferFromDeviceRGB(const std::vector<float>& colors, RenderingIntent intent, unsigned char* outputBuffer, PDFRenderErrorReporter* reporter) const override;
     virtual bool fillRGBBufferFromDeviceCMYK(const std::vector<float>& colors, RenderingIntent intent, unsigned char* outputBuffer, PDFRenderErrorReporter* reporter) const override;
@@ -409,6 +411,13 @@ public:
     /// \param document Document
     void setDocument(const PDFDocument* document);
 
+    /// Same as setDocument(), but decodes output-intent profiles under the given
+    /// operation budget so a hostile /DestOutputProfile cannot bypass the
+    /// cumulative and elapsed decoded-stream accounting. The budget is a
+    /// parameter rather than a member: PDFCMSManager is an exported class and
+    /// growing it would break the Core ABI the Editor plugins link against.
+    void setDocument(const PDFDocument* document, PDFProcessingBudget* processingBudget);
+
     /// Get translated name for color management system
     /// \param system System
     static QString getSystemName(PDFCMSSettings::System system);
@@ -475,4 +484,4 @@ public:
 
 }   // namespace pdf
 
-#endif // PDFCMS_H
+#endif   // PDFCMS_H

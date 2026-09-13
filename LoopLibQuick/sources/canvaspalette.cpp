@@ -23,6 +23,8 @@
 
 #include "canvaspalette.h"
 
+#include "looptokens.h"
+
 namespace pdfquick
 {
 
@@ -43,9 +45,8 @@ constexpr const char* TokenFocus = "#FDE68A";
 constexpr const char* TokenDanger = "#FCA5A5";
 constexpr const char* TokenSuccess = "#86EFAC";
 
-/// docs/quick-design-tokens.json, focus.
-constexpr float FocusOutlineWidthPx = 2.0f;
-constexpr float FocusOutlineOffsetPx = 2.0f;
+constexpr float FocusOutlineWidthPx = static_cast<float>(tokens::FocusOutlineWidthPx);
+constexpr float FocusOutlineOffsetPx = static_cast<float>(tokens::FocusOutlineOffsetPx);
 
 /// Severity stroke widths. These are the redundant encoding that keeps severity
 /// legible without colour; see CanvasPalette's `must_not_depend_on_color_alone`

@@ -22,11 +22,13 @@
 
 #include "processoutputcapture.h"
 
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QTemporaryDir>
 #include <QTest>
 
 namespace
@@ -102,6 +104,9 @@ private slots:
     void unknownCommandIsInvalidInvocation();
     void malformedInvocationIsWrapped();
     void defaultPreflightMalformedInvocationIsWrapped();
+    void fetchImagesOnVectorOnlyDocumentNotesEmptyResult();
+    void fetchImagesFailIfEmptyIsFindings();
+    void fetchTextFailIfEmptyKeepsSuccessWhenTextExists();
     void preflightRejectsNonJsonOutput();
     void preflightKeepsNestedReportBoundary();
 };
@@ -212,6 +217,88 @@ void PdfToolContractTest::defaultPreflightMalformedInvocationIsWrapped()
     const ToolRun run = runPdfTool({ QStringLiteral("preflight"), QStringLiteral("--profile") });
     verifyEnvelope(run, 2, QStringLiteral("preflight"));
     QCOMPARE(run.json.value(QStringLiteral("status")).toString(), QStringLiteral("invalid-invocation"));
+}
+
+namespace
+{
+
+QString textOnlyFixturePath()
+{
+    return QDir(QStringLiteral(LOOP_PREFLIGHT_SOURCE_DIR)).filePath(QStringLiteral("testdata/fixtures/font-embedded.pdf"));
+}
+
+QJsonObject findDiagnostic(const ToolRun& run, const QString& code)
+{
+    for (const QJsonValue& value : run.json.value(QStringLiteral("diagnostics")).toArray())
+    {
+        const QJsonObject diagnostic = value.toObject();
+        if (diagnostic.value(QStringLiteral("code")).toString() == code)
+        {
+            return diagnostic;
+        }
+    }
+
+    return QJsonObject();
+}
+
+}   // namespace
+
+void PdfToolContractTest::fetchImagesOnVectorOnlyDocumentNotesEmptyResult()
+{
+    // A text-only document has no images to extract. That is a legitimate
+    // answer, so the run still succeeds - but it must say so in a way a
+    // machine consumer can see, instead of being indistinguishable from a
+    // successful extraction of zero files.
+    QTemporaryDir outputDirectory;
+    QVERIFY(outputDirectory.isValid());
+
+    const ToolRun run = runPdfTool({ QStringLiteral("fetch-images"),
+                                     textOnlyFixturePath(),
+                                     QStringLiteral("--image-output-dir"), outputDirectory.path(),
+                                     QStringLiteral("--console-format"), QStringLiteral("json") });
+
+    verifyEnvelope(run, 0, QStringLiteral("fetch-images"));
+    QCOMPARE(run.json.value(QStringLiteral("status")).toString(), QStringLiteral("success"));
+
+    const QJsonObject diagnostic = findDiagnostic(run, QStringLiteral("output.empty-result"));
+    QVERIFY2(!diagnostic.isEmpty(), "fetch-images produced no output.empty-result diagnostic");
+    QCOMPARE(diagnostic.value(QStringLiteral("severity")).toString(), QStringLiteral("info"));
+    QCOMPARE(diagnostic.value(QStringLiteral("context")).toObject().value(QStringLiteral("fail_if_empty")).toBool(), false);
+    QVERIFY(run.json.value(QStringLiteral("outputs")).toArray().isEmpty());
+}
+
+void PdfToolContractTest::fetchImagesFailIfEmptyIsFindings()
+{
+    QTemporaryDir outputDirectory;
+    QVERIFY(outputDirectory.isValid());
+
+    const ToolRun run = runPdfTool({ QStringLiteral("fetch-images"),
+                                     textOnlyFixturePath(),
+                                     QStringLiteral("--image-output-dir"), outputDirectory.path(),
+                                     QStringLiteral("--fail-if-empty"),
+                                     QStringLiteral("--console-format"), QStringLiteral("json") });
+
+    verifyEnvelope(run, 1, QStringLiteral("fetch-images"));
+    QCOMPARE(run.json.value(QStringLiteral("status")).toString(), QStringLiteral("findings"));
+
+    const QJsonObject diagnostic = findDiagnostic(run, QStringLiteral("output.empty-result"));
+    QVERIFY2(!diagnostic.isEmpty(), "fetch-images produced no output.empty-result diagnostic");
+    QCOMPARE(diagnostic.value(QStringLiteral("severity")).toString(), QStringLiteral("error"));
+    QCOMPARE(diagnostic.value(QStringLiteral("context")).toObject().value(QStringLiteral("subject")).toString(), QStringLiteral("images"));
+    QCOMPARE(diagnostic.value(QStringLiteral("context")).toObject().value(QStringLiteral("fail_if_empty")).toBool(), true);
+}
+
+void PdfToolContractTest::fetchTextFailIfEmptyKeepsSuccessWhenTextExists()
+{
+    // The flag must not turn a document that does have text into a finding -
+    // it only reports on the empty case.
+    const ToolRun run = runPdfTool({ QStringLiteral("fetch-text"),
+                                     textOnlyFixturePath(),
+                                     QStringLiteral("--fail-if-empty"),
+                                     QStringLiteral("--console-format"), QStringLiteral("json") });
+
+    verifyEnvelope(run, 0, QStringLiteral("fetch-text"));
+    QVERIFY(findDiagnostic(run, QStringLiteral("output.empty-result")).isEmpty());
 }
 
 void PdfToolContractTest::preflightRejectsNonJsonOutput()

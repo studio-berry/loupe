@@ -23,9 +23,16 @@
 
 #include "canvastraceoverlay.h"
 
+#include "looptokens.h"
+
 #include <QFont>
 #include <QFontMetrics>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QPainter>
+
+#include <algorithm>
 
 namespace pdfquick
 {
@@ -33,11 +40,8 @@ namespace pdfquick
 namespace
 {
 
-/// docs/quick-design-tokens.json, typography.small_px.
-constexpr int SmallTextPx = 12;
-
-/// docs/quick-design-tokens.json, spacing.values_px.
-constexpr int PanelPaddingPx = 8;
+constexpr int SmallTextPx = tokens::TypeSmallPx;
+constexpr int PanelPaddingPx = tokens::SpaceS;
 
 QString formatMs(const QJsonValue& value)
 {
@@ -177,6 +181,26 @@ QStringList CanvasTraceOverlay::lines(const QJsonObject& traceSummary, const QJs
     }
 
     result.append(formatSlowCauses(traceSummary.value(QStringLiteral("slow_frame_causes")).toObject()));
+
+    const QJsonObject asyncWork = traceSummary.value(QStringLiteral("async_work")).toObject();
+    QStringList activeKinds;
+    for (const QJsonValue& value : asyncWork.value(QStringLiteral("active_kinds")).toArray())
+    {
+        activeKinds.append(value.toString());
+    }
+    std::sort(activeKinds.begin(), activeKinds.end());
+    const QJsonObject slowKindCounts = asyncWork.value(QStringLiteral("slow_frame_kinds")).toObject();
+    QStringList slowKindNames = slowKindCounts.keys();
+    std::sort(slowKindNames.begin(), slowKindNames.end());
+    QStringList slowKinds;
+    for (const QString& kind : slowKindNames)
+    {
+        slowKinds.append(QStringLiteral("%1 %2").arg(kind, QString::number(slowKindCounts.value(kind).toInteger())));
+    }
+    result.append(QStringLiteral("async work     active %1   slow overlap %2 (%3)")
+                      .arg(activeKinds.isEmpty() ? QStringLiteral("none") : activeKinds.join(QStringLiteral(",")),
+                           QString::number(asyncWork.value(QStringLiteral("slow_frames_with_async_work")).toInteger()),
+                           slowKinds.isEmpty() ? QStringLiteral("none") : slowKinds.join(QStringLiteral(", "))));
 
     result.append(formatFirstView(present.value(QStringLiteral("first_view_ms")).toObject()));
 

@@ -34,6 +34,9 @@
 namespace pdf
 {
 
+struct PreflightVerdict;
+struct PreflightResult;
+
 enum class PDFActionListStepStatus
 {
     Pending,
@@ -86,11 +89,15 @@ struct LOOPLIBCORESHARED_EXPORT PDFActionListStepResult
     QJsonObject resolvedParameters;
     QJsonObject plan;
     QJsonObject repairResult;
+    QJsonObject verdict;
     QJsonArray diagnostics;
     QJsonArray affectedScope;
 
     QJsonObject toJson() const;
 };
+
+LOOPLIBCORESHARED_EXPORT void applyCanonicalPreflightVerdict(PDFActionListStepResult* step, const PreflightVerdict& verdict);
+LOOPLIBCORESHARED_EXPORT void applyCanonicalPreflightVerdict(PDFActionListStepResult* step, const PreflightResult& result);
 
 struct LOOPLIBCORESHARED_EXPORT PDFActionListExecutionResult
 {
@@ -145,6 +152,6 @@ private:
     const PDFRepairRegistry* m_registry = nullptr;
 };
 
-} // namespace pdf
+}   // namespace pdf
 
-#endif // PDFACTIONLIST_H
+#endif   // PDFACTIONLIST_H

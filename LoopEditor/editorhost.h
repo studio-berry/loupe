@@ -35,6 +35,7 @@
 #include "preflightcontroller.h"
 #include "preflightoverlaybridge.h"
 #include "previewstatemodel.h"
+#include "productionmodel.h"
 #include "viewportcommandbridge.h"
 #include "viewportcontroller.h"
 
@@ -45,7 +46,10 @@
 #include "pdfdocumentcontext.h"
 #include "pdfjobscheduler.h"
 
+#include <QColor>
 #include <QObject>
+#include <QHash>
+#include <QJsonObject>
 #include <QPointer>
 #include <QStyleHints>
 #include <QVariantMap>
@@ -91,6 +95,13 @@ class EditorHost final : public QObject
     Q_PROPERTY(QObject* documentModel READ documentModel CONSTANT)
     Q_PROPERTY(QObject* focusRestoration READ focusRestoration CONSTANT)
     Q_PROPERTY(QString preflightStateName READ preflightStateName NOTIFY presentationChanged)
+    Q_PROPERTY(QVariantMap preflightStateVisual READ preflightStateVisual NOTIFY presentationChanged)
+    Q_PROPERTY(QColor preflightStateColor READ preflightStateColor NOTIFY presentationChanged)
+    Q_PROPERTY(QString preflightOperatorSummary READ preflightOperatorSummary NOTIFY presentationChanged)
+    Q_PROPERTY(QVariantList preflightProfiles READ preflightProfiles NOTIFY preflightProfilesChanged)
+    Q_PROPERTY(QVariantList preflightVariables READ preflightVariables NOTIFY preflightProfilesChanged)
+    Q_PROPERTY(QString selectedPreflightProfileId READ selectedPreflightProfileId NOTIFY preflightProfilesChanged)
+    Q_PROPERTY(bool hasPreflightReport READ hasPreflightReport NOTIFY presentationChanged)
     Q_PROPERTY(QString previewSummary READ previewSummary NOTIFY presentationChanged)
     Q_PROPERTY(QString inspectorTitle READ inspectorTitle NOTIFY presentationChanged)
     Q_PROPERTY(bool preferReducedMotion READ preferReducedMotion NOTIFY presentationChanged)
@@ -101,8 +112,24 @@ class EditorHost final : public QObject
     Q_PROPERTY(bool searchPanelVisible READ searchPanelVisible NOTIFY presentationChanged)
     Q_PROPERTY(bool fullscreenRequested READ fullscreenRequested NOTIFY presentationChanged)
     Q_PROPERTY(int workspaceRequest READ workspaceRequest NOTIFY presentationChanged)
+    Q_PROPERTY(LoopWorkspace workspace READ workspace WRITE setWorkspace NOTIFY workspaceChanged)
+    Q_PROPERTY(QString documentShellStatus READ documentShellStatus NOTIFY presentationChanged)
+    Q_PROPERTY(QString productionStateName READ productionStateName NOTIFY presentationChanged)
+    Q_PROPERTY(bool allowDeveloperDiagnostics READ allowDeveloperDiagnostics CONSTANT)
 
 public:
+    enum LoopWorkspace
+    {
+        Document = 0,
+        Preflight = 1,
+        ProductionPreview = 2,
+        Pages = 3,
+        Inspect = 4,
+        Fix = 5,
+        Compare = 6
+    };
+    Q_ENUM(LoopWorkspace)
+
     explicit EditorHost(QObject* parent = nullptr);
     ~EditorHost() override;
 
@@ -129,6 +156,21 @@ public:
     FocusRestoration* focusRestoration() { return &m_focusRestoration; }
 
     QString preflightStateName() const;
+
+    /// Canonical #194 treatment for the current document-level preflight state: the keys
+    /// `kind`, `colorRole`, `icon` and `accessibleName`, all computed by LoopLibQuick from Core's
+    /// own state name. QML renders it; it derives nothing and picks no roles.
+    QVariantMap preflightStateVisual() const;
+
+    /// The `colorRole` above, resolved to a colour for the current theme. QML must never map a role
+    /// name to a colour itself.
+    QColor preflightStateColor() const;
+
+    QString preflightOperatorSummary() const;
+    QVariantList preflightProfiles() const;
+    QVariantList preflightVariables() const;
+    QString selectedPreflightProfileId() const;
+    bool hasPreflightReport() const noexcept { return m_preflight.hasResult(); }
     QString previewSummary() const;
     QString inspectorTitle() const;
     bool preferReducedMotion() const;
@@ -136,6 +178,10 @@ public:
     bool searchPanelVisible() const noexcept { return m_searchPanelVisible; }
     bool fullscreenRequested() const noexcept { return m_fullscreenRequested; }
     int workspaceRequest() const noexcept { return m_workspaceRequest; }
+    LoopWorkspace workspace() const noexcept { return m_workspace; }
+    QString documentShellStatus() const;
+    QString productionStateName() const;
+    bool allowDeveloperDiagnostics() const;
 
     /// Overprint render fidelity for the currently displayed page (issue #49).
     /// True (and pageFidelityReason empty) when the page has no overprint
@@ -153,6 +199,12 @@ public:
 
     Q_INVOKABLE void selectFinding(const QString& findingId);
     Q_INVOKABLE void announceDocumentState(const QString& message);
+    Q_INVOKABLE bool runPreflight();
+    Q_INVOKABLE bool cancelPreflight();
+    Q_INVOKABLE bool selectPreflightProfile(const QString& id);
+    Q_INVOKABLE bool setPreflightVariable(const QString& name, const QVariant& value);
+    Q_INVOKABLE void requestPreflightReportExport();
+    Q_INVOKABLE bool exportPreflightReportFileUrl(const QUrl& url);
 
     /// Toggles the current page between the fast approximate render and the
     /// authoritative overprint-accurate one. Re-renders only that page;
@@ -160,6 +212,7 @@ public:
     Q_INVOKABLE void toggleCurrentPageFidelity();
     Q_INVOKABLE void goToPage(int pageIndex);
     Q_INVOKABLE void goToOutlinePage(int pageIndex);
+    Q_INVOKABLE void setWorkspace(LoopWorkspace workspace);
     Q_INVOKABLE void acknowledgeWorkspaceRequest();
     Q_INVOKABLE void acknowledgeSearchPanel();
 
@@ -198,6 +251,9 @@ public:
 signals:
     void presentationChanged();
     void commandEpochChanged();
+    void workspaceChanged(LoopWorkspace from, LoopWorkspace to);
+    void preflightProfilesChanged();
+    void preflightReportExportRequested();
 
 private:
     void connectFacade();
@@ -218,26 +274,60 @@ private:
     void syncDocumentLifecycle();
     void bindCanvas();
     void unbindCanvas();
+    QStringList activeAsyncWorkKinds() const;
+    void acceptPreflightResult(const QString& jobId,
+                               const QString& documentRevision,
+                               const pdf::PreflightResult& result);
+    void finishPreflightJob(const pdf::PDFJobSnapshot& snapshot);
+    void refreshCanvasTrace();
+    void reloadPreflightProfiles();
+    void updatePreflightProfileWatch();
     void syncRevisionModels();
     void updateCanvasAccessibilitySummary();
     void onPreflightNavigation(pdfinteraction::PreflightController::EvidenceNavigationRequest request);
     void onDragCompleted(pdfinteraction::DragSession session);
+    void onInteractionSelectionChanged(pdfinteraction::InteractionTarget target);
+    void syncProductionState();
+    void applyInspectorSelection(const pdfinteraction::InteractionTarget& target);
+    void applyEmptyCanvasInspectorSelection();
 
     std::unique_ptr<DocumentViewSession> m_session;
     pdfinteraction::PreflightController m_preflight;
     pdfinteraction::PreflightOverlayBridge m_preflightOverlayBridge;
     pdfinteraction::InspectorModel m_inspector;
     pdfinteraction::PreviewStateModel m_preview;
+    pdfinteraction::ProductionModel m_production;
     QuickDocumentModel m_documentModel;
     FocusRestoration m_focusRestoration;
     pdfinteraction::FindingListHitTestSource m_findingsHitTest;
 
     QPointer<pdfquick::LoopCanvasItem> m_canvas;
+    QHash<QString, pdf::PDFJobKind> m_activeAsyncJobs;
+    struct PreflightWorkerOutcome;
+    QHash<QString, std::shared_ptr<PreflightWorkerOutcome>> m_preflightOutcomes;
+    struct PreflightProfileChoice
+    {
+        QString id;
+        QString name;
+        QString version;
+        QString source;
+        QString diagnostic;
+        QString digest;
+        QJsonObject profile;
+        QJsonObject variables;
+        bool valid = false;
+    };
+    QList<PreflightProfileChoice> m_preflightProfiles;
+    QJsonObject m_preflightBindings;
+    QString m_selectedPreflightProfileId;
+    class QFileSystemWatcher* m_preflightProfileWatcher = nullptr;
+    bool m_acceptPreflightResults = true;
     int m_commandEpoch = 0;
     bool m_documentBound = false;
     bool m_searchPanelVisible = false;
     bool m_fullscreenRequested = false;
     int m_workspaceRequest = -1;
+    LoopWorkspace m_workspace = LoopWorkspace::Document;
     int m_searchRow = -1;
 };
 

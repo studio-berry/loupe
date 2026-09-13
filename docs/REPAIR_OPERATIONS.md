@@ -39,9 +39,10 @@ The first adapters use the existing bounded Core fixups:
   `PDF/X-1a:2001`, `PDF/X-3:2002`, `PDF/X-4`, and `PDF/A-2b`. It produces a
   pre-conversion change report and refuses to commit unless an explicitly
   configured independent validator accepts the candidate. Validator arguments
-  must include `{input}`. Transparency flattening, font embedding, and
-  forbidden-action removal are not silently approximated; unsupported cases
-  fail closed.
+  must include `{input}`. Transparency flattening (via the shared
+  `PDFTransparencyFlattener` operation, default-on for X-1a/X-3) is a reported
+  content change, not a silent approximation; font embedding and
+  forbidden-action removal remain unsupported and fail closed.
 
 The preflight capability list is derived from the same registry: an operation
 is advertised only when its descriptor marks it as a preflight fixup. Profile

@@ -23,6 +23,7 @@
 #include "pdfcms.h"
 #include "pdfdocument.h"
 #include "pdfexecutionpolicy.h"
+#include "pdfprocessingbudget.h"
 
 #include <QDir>
 #include <QFile>
@@ -41,7 +42,7 @@
 
 #ifdef LOOP_COMPILER_MSVC
 #pragma warning(push)
-#pragma warning(disable:5033)
+#pragma warning(disable : 5033)
 #endif
 #ifndef CMS_NO_REGISTER_KEYWORD
 #define CMS_NO_REGISTER_KEYWORD
@@ -98,7 +99,7 @@ static QByteArray getWindowsColorProfileData(const QString& profileName)
 {
     std::wstring profileNameW = profileName.toStdWString();
 
-    PROFILE profile = { };
+    PROFILE profile = {};
     profile.dwType = PROFILE_FILENAME;
     profile.pProfileData = profileNameW.data();
     profile.cbDataSize = DWORD((profileNameW.size() + 1) * sizeof(wchar_t));
@@ -106,7 +107,7 @@ static QByteArray getWindowsColorProfileData(const QString& profileName)
     HPROFILE profileHandle = OpenColorProfileW(&profile, PROFILE_READ, FILE_SHARE_READ, OPEN_EXISTING);
     if (!profileHandle)
     {
-        return { };
+        return {};
     }
 
     DWORD profileSize = 0;
@@ -114,7 +115,7 @@ static QByteArray getWindowsColorProfileData(const QString& profileName)
     if (!GetColorProfileFromHandle(profileHandle, nullptr, &profileSize) && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
     {
         CloseColorProfile(profileHandle);
-        return { };
+        return {};
     }
 
     if (profileSize > 0)
@@ -138,7 +139,7 @@ static HPROFILE openWindowsColorProfile(const QString& profileName)
 {
     std::wstring profileNameW = profileName.toStdWString();
 
-    PROFILE profile = { };
+    PROFILE profile = {};
     profile.dwType = PROFILE_FILENAME;
     profile.pProfileData = profileNameW.data();
     profile.cbDataSize = DWORD((profileNameW.size() + 1) * sizeof(wchar_t));
@@ -152,7 +153,7 @@ static PDFColorProfileIdentifier::Type getWindowsColorProfileType(HPROFILE profi
     constexpr DWORD spaceRgb = 0x52474220u;
     constexpr DWORD spaceCmyk = 0x434d594bu;
 
-    PROFILEHEADER header = { };
+    PROFILEHEADER header = {};
     if (!GetColorProfileHeader(profileHandle, &header))
     {
         return PDFColorProfileIdentifier::Type::Invalid;
@@ -180,7 +181,7 @@ static PDFColorProfileIdentifiers getInstalledWindowsColorProfiles()
 {
     PDFColorProfileIdentifiers result;
 
-    ENUMTYPEW enumRecord = { };
+    ENUMTYPEW enumRecord = {};
     enumRecord.dwSize = sizeof(ENUMTYPEW);
     enumRecord.dwVersion = ENUM_TYPE_VERSION;
 
@@ -253,7 +254,7 @@ private:
     static int installCmsPlugins();
 
     static cmsBool optimizePipeline(cmsPipeline** Lut,
-                                    cmsUInt32Number  Intent,
+                                    cmsUInt32Number Intent,
                                     cmsUInt32Number* InputFormat,
                                     cmsUInt32Number* OutputFormat,
                                     cmsUInt32Number* dwFlags);
@@ -556,7 +557,6 @@ bool PDFLittleCMS::transformColorSpace(const PDFCMS::ColorSpaceTransformParams& 
                     target(target),
                     pixelCount(pixelCount)
                 {
-
                 }
 
                 const float* source = nullptr;
@@ -695,7 +695,7 @@ QColor PDFLittleCMS::getColorFromDeviceGray(const PDFColor& color, RenderingInte
         Q_ASSERT(cmsGetTransformOutputFormat(transform) == TYPE_RGB_FLT);
 
         const float grayColor = color[0];
-        std::array<float, 3> rgbOutputColor = { };
+        std::array<float, 3> rgbOutputColor = {};
         cmsDoTransform(transform, &grayColor, rgbOutputColor.data(), 1);
         return getColorFromOutputColor(rgbOutputColor);
     }
@@ -722,7 +722,7 @@ QColor PDFLittleCMS::getColorFromDeviceRGB(const PDFColor& color, RenderingInten
         Q_ASSERT(cmsGetTransformOutputFormat(transform) == TYPE_RGB_FLT);
 
         std::array<float, 3> rgbInputColor = { color[0], color[1], color[2] };
-        std::array<float, 3> rgbOutputColor = { };
+        std::array<float, 3> rgbOutputColor = {};
         cmsDoTransform(transform, rgbInputColor.data(), rgbOutputColor.data(), 1);
         return getColorFromOutputColor(rgbOutputColor);
     }
@@ -749,7 +749,7 @@ QColor PDFLittleCMS::getColorFromDeviceCMYK(const PDFColor& color, RenderingInte
         Q_ASSERT(cmsGetTransformOutputFormat(transform) == TYPE_RGB_FLT);
 
         std::array<float, 4> cmykInputColor = { color[0] * 100.0f, color[1] * 100.0f, color[2] * 100.0f, color[3] * 100.0f };
-        std::array<float, 3> rgbOutputColor = { };
+        std::array<float, 3> rgbOutputColor = {};
         cmsDoTransform(transform, cmykInputColor.data(), rgbOutputColor.data(), 1);
         return getColorFromOutputColor(rgbOutputColor);
     }
@@ -777,7 +777,7 @@ QColor PDFLittleCMS::getColorFromXYZ(const PDFColor3& whitePoint, const PDFColor
 
         const PDFColorComponentMatrix_3x3 adaptationMatrix = PDFChromaticAdaptationXYZ::createWhitepointChromaticAdaptation(getDefaultXYZWhitepoint(), whitePoint, m_settings.colorAdaptationXYZ);
         const PDFColor3 xyzInputColor = adaptationMatrix * color;
-        std::array<float, 3> rgbOutputColor = { };
+        std::array<float, 3> rgbOutputColor = {};
         cmsDoTransform(transform, xyzInputColor.data(), rgbOutputColor.data(), 1);
         return getColorFromOutputColor(rgbOutputColor);
     }
@@ -856,7 +856,7 @@ QColor PDFLittleCMS::getColorFromICC(const PDFColor& color, RenderingIntent rend
         return QColor();
     }
 
-    std::array<float, 4> inputBuffer = { };
+    std::array<float, 4> inputBuffer = {};
     const cmsUInt32Number format = cmsGetTransformInputFormat(transform);
     const cmsUInt32Number channels = T_CHANNELS(format);
     const cmsUInt32Number colorSpace = T_COLORSPACE(format);
@@ -868,7 +868,7 @@ QColor PDFLittleCMS::getColorFromICC(const PDFColor& color, RenderingIntent rend
             inputBuffer[i] = isCMYK ? color[i] * 100.0f : color[i];
         }
 
-        std::array<float, 3> rgbOutputColor = { };
+        std::array<float, 3> rgbOutputColor = {};
         cmsDoTransform(transform, inputBuffer.data(), rgbOutputColor.data(), 1);
         return getColorFromOutputColor(rgbOutputColor);
     }
@@ -916,7 +916,7 @@ void PDFLittleCMS::init()
 
 int PDFLittleCMS::installCmsPlugins()
 {
-    static cmsPluginOptimization optimizationPlugin = { };
+    static cmsPluginOptimization optimizationPlugin = {};
     optimizationPlugin.base.Magic = cmsPluginMagicNumber;
     optimizationPlugin.base.Type = cmsPluginOptimizationSig;
     optimizationPlugin.base.Next = nullptr;
@@ -1027,14 +1027,16 @@ bool PDFLittleCMS::isSoftProofing() const
 
 cmsHPROFILE PDFLittleCMS::createProfile(const QString& id, const PDFColorProfileIdentifiers& profileDescriptors, bool preferOutputProfile) const
 {
-    auto it = std::find_if(profileDescriptors.cbegin(), profileDescriptors.cend(), [&id](const PDFColorProfileIdentifier& identifier) { return identifier.id == id; });
+    auto it = std::find_if(profileDescriptors.cbegin(), profileDescriptors.cend(), [&id](const PDFColorProfileIdentifier& identifier)
+                           { return identifier.id == id; });
     if (preferOutputProfile && it != profileDescriptors.end())
     {
         const PDFColorProfileIdentifier& identifier = *it;
         if (!identifier.isOutputIntentProfile)
         {
             // Find first output intent color profile
-            auto itOutputIntentColorProfile = std::find_if(profileDescriptors.cbegin(), profileDescriptors.cend(), [](const PDFColorProfileIdentifier& identifier) { return identifier.isOutputIntentProfile; });
+            auto itOutputIntentColorProfile = std::find_if(profileDescriptors.cbegin(), profileDescriptors.cend(), [](const PDFColorProfileIdentifier& identifier)
+                                                           { return identifier.isOutputIntentProfile; });
             if (itOutputIntentColorProfile != profileDescriptors.end())
             {
                 it = itOutputIntentColorProfile;
@@ -1049,7 +1051,7 @@ cmsHPROFILE PDFLittleCMS::createProfile(const QString& id, const PDFColorProfile
         {
             case PDFColorProfileIdentifier::Type::Gray:
             {
-                cmsCIExyY whitePoint{ };
+                cmsCIExyY whitePoint{};
                 if (cmsWhitePointFromTemp(&whitePoint, identifier.temperature))
                 {
                     cmsToneCurve* gammaCurve = cmsBuildGamma(cmsContext(), identifier.gamma);
@@ -1069,7 +1071,7 @@ cmsHPROFILE PDFLittleCMS::createProfile(const QString& id, const PDFColorProfile
 
             case PDFColorProfileIdentifier::Type::RGB:
             {
-                cmsCIExyY whitePoint{ };
+                cmsCIExyY whitePoint{};
                 if (cmsWhitePointFromTemp(&whitePoint, identifier.temperature))
                 {
                     cmsCIExyYTRIPLE primaries;
@@ -1422,8 +1424,8 @@ QString getInfoFromProfile(cmsHPROFILE profile, cmsInfoType infoType)
     QString country = QLocale::territoryToString(locale.territory());
     QString language = QLocale::languageToString(locale.language());
 
-    char countryCode[3] = { };
-    char languageCode[3] = { };
+    char countryCode[3] = {};
+    char languageCode[3] = {};
     if (country.size() == 2)
     {
         countryCode[0] = country[0].toLatin1();
@@ -1459,7 +1461,6 @@ QString getInfoFromProfile(cmsHPROFILE profile, cmsInfoType infoType)
 PDFCMSGeneric::PDFCMSGeneric(const PDFColorConvertor& colorConvertor) :
     m_colorConvertor(colorConvertor)
 {
-
 }
 
 bool PDFCMSGeneric::isCompatible(const PDFCMSSettings& settings) const
@@ -1619,7 +1620,6 @@ PDFCMSManager::PDFCMSManager(QObject* parent) :
     m_document(nullptr),
     m_mutex()
 {
-
 }
 
 void PDFCMSManager::finalize()
@@ -1716,6 +1716,11 @@ PDFCMSSettings PDFCMSManager::getDefaultSettings() const
 
 void PDFCMSManager::setDocument(const PDFDocument* document)
 {
+    setDocument(document, nullptr);
+}
+
+void PDFCMSManager::setDocument(const PDFDocument* document, PDFProcessingBudget* processingBudget)
+{
     std::optional<QMutexLocker<QRecursiveMutex>> lock;
     lock.emplace(&m_mutex);
 
@@ -1741,8 +1746,16 @@ void PDFCMSManager::setDocument(const PDFDocument* document)
                 PDFObject outputProfileObject = m_document->getObject(outputIntent.getOutputProfile());
                 if (outputProfileObject.isStream())
                 {
-                    content = m_document->getDecodedStream(outputProfileObject.getStream());
+                    content = m_document->getDecodedStream(outputProfileObject.getStream(), processingBudget);
                 }
+            }
+            catch (const PDFBudgetExceededException&)
+            {
+                // A budget failure is an incomplete operation, not a profile that
+                // failed to parse: it must reach the caller (see
+                // docs/RESOURCE_BUDGETS.md - "a budget failure is incomplete,
+                // never PASS").
+                throw;
             }
             catch (const PDFException&)
             {
@@ -1869,8 +1882,7 @@ PDFColorProfileIdentifiers PDFCMSManager::getGrayProfilesImpl() const
 {
     // Jakub Melka: We create gray profiles for temperature 5000K, 6500K and 9300K.
     // We also use linear gamma and gamma value 2.2.
-    PDFColorProfileIdentifiers result =
-    {
+    PDFColorProfileIdentifiers result = {
         PDFColorProfileIdentifier::createGray(tr("Gray D65, γ = 2.2"), "@GENERIC_Gray_D65_g22", 6500.0, 2.2),
         PDFColorProfileIdentifier::createGray(tr("Gray D50, γ = 2.2"), "@GENERIC_Gray_D50_g22", 5000.0, 2.2),
         PDFColorProfileIdentifier::createGray(tr("Gray D93, γ = 2.2"), "@GENERIC_Gray_D93_g22", 9300.0, 2.2),
@@ -1890,8 +1902,7 @@ PDFColorProfileIdentifiers PDFCMSManager::getRGBProfilesImpl() const
 {
     // Jakub Melka: We create RGB profiles for common standards and also for
     // default standard sRGB. See https://en.wikipedia.org/wiki/Color_spaces_with_RGB_primaries.
-    PDFColorProfileIdentifiers result =
-    {
+    PDFColorProfileIdentifiers result = {
         PDFColorProfileIdentifier::createSRGB(),
         PDFColorProfileIdentifier::createRGB(tr("HDTV (ITU-R BT.709)"), "@GENERIC_RGB_HDTV", 6500, QPointF(0.64, 0.33), QPointF(0.30, 0.60), QPointF(0.15, 0.06), 20.0 / 9.0),
         PDFColorProfileIdentifier::createRGB(tr("Adobe RGB 1998"), "@GENERIC_RGB_Adobe1998", 6500, QPointF(0.64, 0.33), QPointF(0.30, 0.60), QPointF(0.15, 0.06), 563.0 / 256.0),
@@ -2046,7 +2057,8 @@ PDFColorProfileIdentifiers PDFCMSManager::getFilteredExternalProfiles(PDFColorPr
 PDFColorProfileIdentifiers PDFCMSManager::getFilteredOutputIntentProfiles(PDFColorProfileIdentifier::Type type) const
 {
     PDFColorProfileIdentifiers result;
-    std::copy_if(m_outputIntentProfiles.cbegin(), m_outputIntentProfiles.cend(), std::back_inserter(result), [type](const PDFColorProfileIdentifier& identifier) { return identifier.type == type; });
+    std::copy_if(m_outputIntentProfiles.cbegin(), m_outputIntentProfiles.cend(), std::back_inserter(result), [type](const PDFColorProfileIdentifier& identifier)
+                 { return identifier.type == type; });
     return result;
 }
 
@@ -2134,24 +2146,23 @@ PDFColorComponentMatrix_3x3 PDFChromaticAdaptationXYZ::createWhitepointChromatic
 
         case pdf::PDFCMSSettings::ColorAdaptationXYZ::XYZScaling:
             matrix.makeDiagonal(std::array{ targetWhitePoint[0] / sourceWhitePoint[0],
-                                  targetWhitePoint[1] / sourceWhitePoint[1],
-                                  targetWhitePoint[2] / sourceWhitePoint[2]
-                                });
+                                            targetWhitePoint[1] / sourceWhitePoint[1],
+                                            targetWhitePoint[2] / sourceWhitePoint[2] });
             break;
 
         case pdf::PDFCMSSettings::ColorAdaptationXYZ::CAT97:
         {
             // CAT97 matrix, as defined in https://en.wikipedia.org/wiki/LMS_color_space
             constexpr PDFColorComponentMatrix_3x3 cat97Matrix(
-                         0.8562f,  0.3372f, -0.1934f,
-                        -0.8360f,  1.8327f,  0.0033f,
-                         0.0357f, -0.0469f,  1.0112f);
+                0.8562f, 0.3372f, -0.1934f,
+                -0.8360f, 1.8327f, 0.0033f,
+                0.0357f, -0.0469f, 1.0112f);
 
             // Inverse of CAT97 matrix (using wxMaxima to compute it)
             constexpr PDFColorComponentMatrix_3x3 inverseCat97Matrix(
-                         0.9873999149199271f,   -0.1768250198556842f,   0.1894251049357571f,
-                         0.4504351090445315f,    0.464932897752711f,    0.08463199320275755f,
-                        -0.01396832510725165f,   0.027806572501434f,    0.9861617526058175f);
+                0.9873999149199271f, -0.1768250198556842f, 0.1894251049357571f,
+                0.4504351090445315f, 0.464932897752711f, 0.08463199320275755f,
+                -0.01396832510725165f, 0.027806572501434f, 0.9861617526058175f);
 
             PDFColor3 adaptedTargetWhitePoint = cat97Matrix * targetWhitePoint;
             PDFColor3 adaptedSourceWhitePoint = cat97Matrix * sourceWhitePoint;
@@ -2172,15 +2183,15 @@ PDFColorComponentMatrix_3x3 PDFChromaticAdaptationXYZ::createWhitepointChromatic
         {
             // CAT02 matrix, as defined in https://en.wikipedia.org/wiki/LMS_color_space
             constexpr PDFColorComponentMatrix_3x3 cat02Matrix(
-                         0.7328f,  0.4296f, -0.1624f,
-                        -0.7036f,  1.6975f,  0.0061f,
-                         0.0030f,  0.0136f,  0.9834f);
+                0.7328f, 0.4296f, -0.1624f,
+                -0.7036f, 1.6975f, 0.0061f,
+                0.0030f, 0.0136f, 0.9834f);
 
             // Inverse of CAT02 matrix (using wxMaxima to compute it)
             constexpr PDFColorComponentMatrix_3x3 inverseCat02Matrix(
-                        1.096123820835514f,     -0.2788690002182872f,   0.182745179382773f,
-                        0.4543690419753592f,     0.4735331543074117f,   0.0720978037172291f,
-                       -0.009627608738429352f,  -0.005698031216113419f, 1.015325639954543f);
+                1.096123820835514f, -0.2788690002182872f, 0.182745179382773f,
+                0.4543690419753592f, 0.4735331543074117f, 0.0720978037172291f,
+                -0.009627608738429352f, -0.005698031216113419f, 1.015325639954543f);
 
             PDFColor3 adaptedTargetWhitePoint = cat02Matrix * targetWhitePoint;
             PDFColor3 adaptedSourceWhitePoint = cat02Matrix * sourceWhitePoint;
@@ -2201,15 +2212,15 @@ PDFColorComponentMatrix_3x3 PDFChromaticAdaptationXYZ::createWhitepointChromatic
         {
             // Bradford matrix, as defined in https://en.wikipedia.org/wiki/LMS_color_space
             constexpr PDFColorComponentMatrix_3x3 bradfordMatrix(
-                 0.8951f,  0.2264f, -0.1614f,
-                -0.7502f,  1.7135f,  0.0367f,
-                 0.0389f, -0.0685f,  1.0296f);
+                0.8951f, 0.2264f, -0.1614f,
+                -0.7502f, 1.7135f, 0.0367f,
+                0.0389f, -0.0685f, 1.0296f);
 
             // Inverse of bradford matrix (using wxMaxima to compute it)
             constexpr PDFColorComponentMatrix_3x3 inverseBradfordMatrix(
-                    1.004360519274085f,     -0.1262294327613208f,   0.1619428982062721f,
-                    0.4399123264001572f,     0.527481594455384f,    0.05015858096782513f,
-                   -0.008678739162151443f,   0.03986287311053728f,  0.9684695843590444f);
+                1.004360519274085f, -0.1262294327613208f, 0.1619428982062721f,
+                0.4399123264001572f, 0.527481594455384f, 0.05015858096782513f,
+                -0.008678739162151443f, 0.03986287311053728f, 0.9684695843590444f);
 
             PDFColor3 adaptedTargetWhitePoint = bradfordMatrix * targetWhitePoint;
             PDFColor3 adaptedSourceWhitePoint = bradfordMatrix * sourceWhitePoint;

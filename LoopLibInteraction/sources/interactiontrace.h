@@ -27,8 +27,10 @@
 #include "interactionglobal.h"
 
 #include <QJsonObject>
+#include <QHash>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include <array>
 #include <functional>
@@ -187,6 +189,10 @@ public:
     /// Adds `durationNs` to a stage of the open frame.
     void recordStage(TraceStage stage, qint64 durationNs);
 
+    /// Records the privacy-safe kinds of asynchronous work active for the
+    /// current frame. Kinds are service names only: never ids or payloads.
+    void recordAsyncWorkKinds(QStringList kinds);
+
     /// Closes the open frame, acknowledging every input recorded at or before
     /// its end.
     void endFrame();
@@ -222,6 +228,7 @@ private:
     {
         qint64 startNs = 0;
         std::array<qint64, TraceStageCount> stageNs{};
+        QStringList asyncWorkKinds;
     };
 
     struct PendingInput
@@ -246,11 +253,15 @@ private:
     QList<qint64> m_inputLatencies;
     std::array<QList<qint64>, TraceStageCount> m_stageDurations;
     std::array<quint64, TraceStageCount> m_slowCauseCounts{};
+    QStringList m_activeAsyncWorkKinds;
+    QHash<QString, quint64> m_asyncSlowFrameKinds;
 
     quint64 m_inputCount = 0;
     quint64 m_frameCount = 0;
     quint64 m_droppedInputRecords = 0;
     quint64 m_unbalancedFrames = 0;
+    quint64 m_framesWithAsyncWork = 0;
+    quint64 m_slowFramesWithAsyncWork = 0;
     int m_cacheHits = 0;
     int m_cacheMisses = 0;
 };

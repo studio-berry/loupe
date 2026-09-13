@@ -67,6 +67,7 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
     if(LOOP_BUILD_QUICK_CANVAS)
         add_executable(UnitTestsEditorHost
             tst_editorhosttest.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/app.qrc
             ${CMAKE_SOURCE_DIR}/LoopEditor/editorhost.cpp
             ${CMAKE_SOURCE_DIR}/LoopEditor/editorhost.h
             ${CMAKE_SOURCE_DIR}/LoopEditor/documentviewsession.cpp
@@ -80,6 +81,15 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
         target_link_libraries(UnitTestsEditorHost PRIVATE LoopLibQuick LoopLibInteraction LoopLibCore Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
 
         target_include_directories(UnitTestsEditorHost PRIVATE ${CMAKE_SOURCE_DIR}/LoopEditor)
+
+        # Issue #195's GUI-to-CLI anti-divergence slot drives the built PdfTool
+        # as the CLI oracle, the same way UnitTestsPreflightCorpus does, and
+        # locates its fixture through the same source-dir definition.
+        add_dependencies(UnitTestsEditorHost PdfTool)
+        target_compile_definitions(UnitTestsEditorHost PRIVATE
+            LOOP_PREFLIGHT_SOURCE_DIR="${CMAKE_SOURCE_DIR}/loop-preflight"
+            PDFTOOL_EXECUTABLE_PATH="$<TARGET_FILE:PdfTool>"
+        )
 
         set_target_properties(UnitTestsEditorHost PROPERTIES
             WIN32_EXECUTABLE OFF
@@ -118,7 +128,7 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
         )
         add_test(UnitTestsProductOperatorLoop "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsProductOperatorLoop")
-        set_tests_properties(UnitTestsProductOperatorLoop PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        set_tests_properties(UnitTestsProductOperatorLoop PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
     endif()
 
     # Architecture invariant I23, admission half: one render-request path through
@@ -188,6 +198,24 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
     )
     add_test(UnitTestsInteractionController "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsInteractionController")
+
+    # Issue #146 AC7: the fixed-order contract evaluator a trace harness folds
+    # its recorded outcomes into. No InteractionController, no replay, no
+    # scheduler -- just the ordered checklist and the phase-attribution table
+    # from docs/INTERACTION_CONTRACT.md.
+    add_executable(UnitTestsInteractionTraceContract
+        tst_interactiontracecontracttest.cpp
+    )
+
+    target_link_libraries(UnitTestsInteractionTraceContract PRIVATE LoopLibInteraction LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+
+    set_target_properties(UnitTestsInteractionTraceContract PROPERTIES
+        WIN32_EXECUTABLE OFF
+        MACOSX_BUNDLE OFF
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_LIB_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
+    )
+    add_test(UnitTestsInteractionTraceContract "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsInteractionTraceContract")
 
     # Issue #145: the spatial index used by EvidenceHitTestSource and
     # FindingListHitTestSource, and their hit-testing/precedence contracts
@@ -299,6 +327,54 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
         )
         add_test(UnitTestsShellKeyboard "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsShellKeyboard")
+
+        add_executable(UnitTestsShellWorkspace
+            tst_shellworkspacetest.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/editorhost.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/editorhost.h
+            ${CMAKE_SOURCE_DIR}/LoopEditor/documentviewsession.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/documentviewsession.h
+            ${CMAKE_SOURCE_DIR}/LoopEditor/quickdocumentmodel.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/quickdocumentmodel.h
+            ${CMAKE_SOURCE_DIR}/LoopEditor/focusrestoration.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/focusrestoration.h
+        )
+
+        target_link_libraries(UnitTestsShellWorkspace PRIVATE LoopLibQuick LoopLibInteraction LoopLibCore Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
+
+        target_include_directories(UnitTestsShellWorkspace PRIVATE ${CMAKE_SOURCE_DIR}/LoopEditor)
+
+        set_target_properties(UnitTestsShellWorkspace PROPERTIES
+            WIN32_EXECUTABLE OFF
+            MACOSX_BUNDLE OFF
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_LIB_DIR}
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
+        )
+        add_test(UnitTestsShellWorkspace "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsShellWorkspace")
+
+        add_executable(UnitTestsShellInspectorDispatch
+            tst_shellinspectordispatch.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/editorhost.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/editorhost.h
+            ${CMAKE_SOURCE_DIR}/LoopEditor/documentviewsession.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/documentviewsession.h
+            ${CMAKE_SOURCE_DIR}/LoopEditor/quickdocumentmodel.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/quickdocumentmodel.h
+            ${CMAKE_SOURCE_DIR}/LoopEditor/focusrestoration.cpp
+            ${CMAKE_SOURCE_DIR}/LoopEditor/focusrestoration.h
+        )
+
+        target_link_libraries(UnitTestsShellInspectorDispatch PRIVATE LoopLibQuick LoopLibInteraction LoopLibCore Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
+
+        target_include_directories(UnitTestsShellInspectorDispatch PRIVATE ${CMAKE_SOURCE_DIR}/LoopEditor)
+
+        set_target_properties(UnitTestsShellInspectorDispatch PROPERTIES
+            WIN32_EXECUTABLE OFF
+            MACOSX_BUNDLE OFF
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_LIB_DIR}
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
+        )
+        add_test(UnitTestsShellInspectorDispatch "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsShellInspectorDispatch")
     endif()
 
     # Architecture invariant I25. The inverse of the five targets above: this one

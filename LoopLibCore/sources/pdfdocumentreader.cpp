@@ -40,6 +40,19 @@
 namespace pdf
 {
 
+namespace
+{
+
+// Bounds for the dense object table built by damaged-document recovery. The
+// table is indexed by object number, so its size is driven by the highest
+// number a malformed document happens to declare rather than by how much was
+// actually recovered. A document numbered more sparsely than this is not a
+// recoverable document, it is a document asking for a large allocation.
+constexpr PDFInteger DAMAGED_DOCUMENT_MAX_OBJECT_NUMBER_DENSITY = 64;
+constexpr PDFInteger DAMAGED_DOCUMENT_MINIMUM_OBJECT_SLOTS = 4096;
+
+}   // namespace
+
 PDFDocumentReader::PDFDocumentReader(PDFProgress* progress,
                                      const std::function<QString(bool*)>& getPasswordCallback,
                                      bool permissive,
@@ -313,7 +326,8 @@ PDFObject PDFDocumentReader::getObjectFromXrefTable(PDFXRefTable* xrefTable, PDF
 PDFObject PDFDocumentReader::readDamagedTrailerDictionary() const
 {
     PDFObject object = PDFObject::createDictionary(std::make_shared<PDFDictionary>(PDFDictionary()));
-    PDFParsingContext context([](PDFParsingContext*, PDFObjectReference){ return PDFObject(); });
+    PDFParsingContext context([](PDFParsingContext*, PDFObjectReference)
+                              { return PDFObject(); });
 
     int offset = 0;
     while (offset < m_source.size())
@@ -350,7 +364,8 @@ PDFObject PDFDocumentReader::readDamagedTrailerDictionary() const
 
 PDFDocumentReader::Result PDFDocumentReader::processReferenceTableEntries(PDFXRefTable* xrefTable, const std::vector<PDFXRefTable::Entry>& occupiedEntries, PDFObjectStorage::PDFObjects& objects)
 {
-    auto objectFetcher = [this, xrefTable](PDFParsingContext* context, PDFObjectReference reference) { return getObjectFromXrefTable(xrefTable, context, reference); };
+    auto objectFetcher = [this, xrefTable](PDFParsingContext* context, PDFObjectReference reference)
+    { return getObjectFromXrefTable(xrefTable, context, reference); };
     auto processEntry = [this, &objectFetcher, &objects](const PDFXRefTable::Entry& entry)
     {
         Q_ASSERT(entry.type == PDFXRefTable::EntryType::Occupied);
@@ -503,8 +518,9 @@ void PDFDocumentReader::processObjectStreams(PDFXRefTable* xrefTable, PDFObjectS
         objectStreams.insert(entry.objectStream);
     }
 
-    auto objectFetcher = [this, xrefTable](PDFParsingContext* context, PDFObjectReference reference) { return getObjectFromXrefTable(xrefTable, context, reference); };
-    auto processObjectStream = [this, &objectFetcher, &objects, &objectStreamEntries] (const PDFObjectReference& objectStreamReference)
+    auto objectFetcher = [this, xrefTable](PDFParsingContext* context, PDFObjectReference reference)
+    { return getObjectFromXrefTable(xrefTable, context, reference); };
+    auto processObjectStream = [this, &objectFetcher, &objects, &objectStreamEntries](const PDFObjectReference& objectStreamReference)
     {
         if (m_result != Result::OK)
         {
@@ -603,7 +619,8 @@ void PDFDocumentReader::processObjectStreams(PDFXRefTable* xrefTable, PDFObjectS
                 parser.seek(offset);
 
                 PDFObject currentObject = parser.getObject();
-                auto predicate = [objectNumber, objectStreamReference](const PDFXRefTable::Entry& entry) -> bool { return entry.reference.objectNumber == objectNumber && entry.objectStream == objectStreamReference; };
+                auto predicate = [objectNumber, objectStreamReference](const PDFXRefTable::Entry& entry) -> bool
+                { return entry.reference.objectNumber == objectNumber && entry.objectStream == objectStreamReference; };
                 if (std::find_if(objectStreamEntries.cbegin(), objectStreamEntries.cend(), predicate) != objectStreamEntries.cend())
                 {
                     QMutexLocker lock(&m_mutex);
@@ -671,6 +688,34 @@ PDFDocument PDFDocumentReader::readFromBuffer(const QByteArray& buffer)
             throw PDFException(tr("Empty xref table."));
         }
 
+        // The reader allocates a dense object table for every declared slot -
+        // including free and never-referenced ones - so the declared cardinality,
+        // not the number of occupied entries, is what must fit the document-model
+        // object budget. A sparse table otherwise turns a small file into a large
+        // allocation before a single object has been visited.
+        //
+        // The refusal is raised through the budget vocabulary the rest of the
+        // reader already uses (PDFBudgetExceededException, kind ObjectsVisited)
+        // rather than a bespoke message: it is the same budget a document whose
+        // object table grows past the limit trips while being read, so the failure
+        // stays attributable ("attempted N, limit L") and a budget failure still
+        // fails the read closed instead of being retried permissively. The detail
+        // is built directly because there is no bulk charge in the public budget
+        // API, and charging one object at a time up to the limit would make the
+        // refusal cost attacker-amplifiable work.
+        const std::uint64_t declaredObjectCount = xrefTable.getSize();
+        const std::uint64_t maximalObjectTableSize = m_processingBudget.limits().maxObjectsVisited;
+        if (declaredObjectCount > maximalObjectTableSize)
+        {
+            PDFBudgetExceeded detail;
+            detail.kind = PDFBudgetKind::ObjectsVisited;
+            detail.pool = budgetPoolFor(detail.kind);
+            detail.limit = maximalObjectTableSize;
+            detail.attempted = declaredObjectCount;
+            detail.context = tr("PDF object table");
+            throw PDFBudgetExceededException(std::move(detail));
+        }
+
         PDFObjectStorage::PDFObjects objects;
         objects.resize(xrefTable.getSize());
 
@@ -708,7 +753,7 @@ PDFDocument PDFDocumentReader::readFromBuffer(const QByteArray& buffer)
         m_warnings << m_errorMessage;
         return PDFDocument();
     }
-    catch (const PDFException &parserException)
+    catch (const PDFException& parserException)
     {
         m_result = Result::Failed;
         m_errorMessage = parserException.getMessage();
@@ -884,7 +929,27 @@ PDFDocument PDFDocumentReader::readDamagedDocumentFromBuffer(const QByteArray& b
 
         if (!restoredObjects.empty())
         {
-            objects.resize(restoredObjects.rbegin()->first.objectNumber + 1);
+            // The object table is dense: it is indexed by object number, so a
+            // single recovered object numbered 9999999 would allocate ten million
+            // entries. The per-reference check in restoreObjects() bounds an
+            // object number by the file size, which on a 50 MiB file still allows
+            // a table of fifty million entries. Bound the table by how many
+            // objects were actually recovered instead: real damaged documents are
+            // numbered densely, and a highest-number-to-recovered-count ratio far
+            // past that is a malformed document rather than a recoverable one.
+            const PDFInteger highestObjectNumber = restoredObjects.rbegin()->first.objectNumber;
+            const PDFInteger maximumObjectNumber = std::max<PDFInteger>(
+                DAMAGED_DOCUMENT_MINIMUM_OBJECT_SLOTS,
+                static_cast<PDFInteger>(restoredObjects.size()) * DAMAGED_DOCUMENT_MAX_OBJECT_NUMBER_DENSITY);
+
+            if (highestObjectNumber > maximumObjectNumber)
+            {
+                throw PDFException(PDFTranslationContext::tr("Damaged document declares object number %1, but only %2 objects could be recovered; refusing to build an object table of that size.")
+                                       .arg(highestObjectNumber)
+                                       .arg(restoredObjects.size()));
+            }
+
+            objects.resize(highestObjectNumber + 1);
 
             for (auto& objectItem : restoredObjects)
             {
@@ -901,9 +966,16 @@ PDFDocument PDFDocumentReader::readDamagedDocumentFromBuffer(const QByteArray& b
         }
 
         PDFObjectStorage storage(std::move(objects), PDFObject(trailerDictionaryObject), qMove(m_securityHandler));
-        return PDFDocument(std::move(storage), m_version, QByteArray());
+
+        // The recovered document corresponds to exactly these bytes, so it gets a
+        // real source digest like any other successful read. Returning an empty
+        // digest here silently disabled the "the file changed underneath us" guard
+        // in PDFDocumentWriter::writeIncremental for every permissively recovered
+        // document - the one class of document where appending to the wrong bytes
+        // is most likely.
+        return PDFDocument(std::move(storage), m_version, hash(buffer));
     }
-    catch (const PDFException &parserException)
+    catch (const PDFException& parserException)
     {
         m_result = Result::Failed;
         m_warnings << parserException.getMessage();

@@ -362,8 +362,11 @@ bool QuickDocumentModel::search(const QString& query)
     }
 
     const pdf::PDFDocumentSearchResult searchResult = pdf::searchDocumentText(m_context, query);
-    if (!searchResult.admitted)
+    if (!searchResult.admitted || !searchResult.completed)
+    {
+        clearSearch();
         return false;
+    }
 
     QList<QuickSearchResultModel::Result> results;
     results.reserve(searchResult.matches.size());

@@ -32,6 +32,19 @@
 namespace pdftool::ocr
 {
 
+/// The OCR option defaults, in one place. They are consumed both by the
+/// capability-discovery table (which tells callers what the defaults are) and by
+/// the command-line parser (which applies them), so a single definition is what
+/// keeps the advertised default and the applied default from drifting apart.
+///
+/// Language codes are ISO 639-1 ("en", "de"), matching what the loop-ocr sidecar
+/// normalizes to in engine.py::normalize_languages. Nothing in Loop emits ISO
+/// 639-2 ("eng", "deu"); if that ever changes, convert at this boundary rather
+/// than teaching downstream consumers both code sets.
+inline constexpr QLatin1StringView DEFAULT_OCR_LANGUAGES = QLatin1StringView("en");
+inline constexpr QLatin1StringView DEFAULT_OCR_DPI = QLatin1StringView("300");
+inline constexpr QLatin1StringView DEFAULT_OCR_MIN_TEXT_CHARS = QLatin1StringView("20");
+
 inline QStringList normalizeLanguages(const QString& specification)
 {
     QStringList languages;
@@ -46,7 +59,7 @@ inline QStringList normalizeLanguages(const QString& specification)
 
     if (languages.isEmpty())
     {
-        languages.append(QStringLiteral("en"));
+        languages.append(QString(DEFAULT_OCR_LANGUAGES));
     }
     else
     {
@@ -85,8 +98,7 @@ inline bool validateSidecarBbox(const QJsonValue& value, QString* errorMessage)
         }
     }
 
-    if (bbox.value(QStringLiteral("width")).toDouble() < 0.0
-        || bbox.value(QStringLiteral("height")).toDouble() < 0.0)
+    if (bbox.value(QStringLiteral("width")).toDouble() < 0.0 || bbox.value(QStringLiteral("height")).toDouble() < 0.0)
     {
         return setValidationError(errorMessage, QStringLiteral("OCR sidecar bbox width and height must be non-negative."));
     }
@@ -97,8 +109,7 @@ inline bool validateSidecarResponse(const QJsonObject& response,
                                     int expectedPage,
                                     QString* errorMessage = nullptr)
 {
-    if (!isFiniteNumber(response.value(QStringLiteral("page")))
-        || response.value(QStringLiteral("page")).toDouble() != expectedPage)
+    if (!isFiniteNumber(response.value(QStringLiteral("page"))) || response.value(QStringLiteral("page")).toDouble() != expectedPage)
     {
         return setValidationError(errorMessage, QStringLiteral("OCR sidecar returned the wrong page number."));
     }
@@ -111,16 +122,14 @@ inline bool validateSidecarResponse(const QJsonObject& response,
 
     if (!okValue.toBool())
     {
-        if (!response.value(QStringLiteral("error")).isString()
-            || response.value(QStringLiteral("error")).toString().trimmed().isEmpty())
+        if (!response.value(QStringLiteral("error")).isString() || response.value(QStringLiteral("error")).toString().trimmed().isEmpty())
         {
             return setValidationError(errorMessage, QStringLiteral("OCR sidecar failure response missing error text."));
         }
         return true;
     }
 
-    if (!response.value(QStringLiteral("text")).isString()
-        || !response.value(QStringLiteral("lines")).isArray())
+    if (!response.value(QStringLiteral("text")).isString() || !response.value(QStringLiteral("lines")).isArray())
     {
         return setValidationError(errorMessage, QStringLiteral("Malformed successful OCR sidecar response."));
     }
@@ -134,8 +143,7 @@ inline bool validateSidecarResponse(const QJsonObject& response,
         }
 
         const QJsonObject line = lineValue.toObject();
-        if (!line.value(QStringLiteral("text")).isString()
-            || !isFiniteNumber(line.value(QStringLiteral("confidence"))))
+        if (!line.value(QStringLiteral("text")).isString() || !isFiniteNumber(line.value(QStringLiteral("confidence"))))
         {
             return setValidationError(errorMessage, QStringLiteral("Malformed OCR sidecar line."));
         }
@@ -151,4 +159,4 @@ inline bool validateSidecarResponse(const QJsonObject& response,
 
 }   // namespace pdftool::ocr
 
-#endif // OCRSIDECARPROTOCOL_H
+#endif   // OCRSIDECARPROTOCOL_H

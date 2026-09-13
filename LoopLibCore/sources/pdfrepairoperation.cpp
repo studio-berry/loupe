@@ -277,7 +277,8 @@ QJsonObject PDFRepairResult::toJson() const
         { QStringLiteral("incomplete_reasons"), stringArray(incompleteReasons) },
         { QStringLiteral("validation_failures"), stringArray(validationFailures) },
         { QStringLiteral("validation"), validationsJson },
-        { QStringLiteral("finding_delta"), findingDelta.toJson() }
+        { QStringLiteral("finding_delta"), findingDelta.toJson() },
+        { QStringLiteral("verdict"), verdict }
     };
 }
 

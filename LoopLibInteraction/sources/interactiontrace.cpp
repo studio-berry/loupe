@@ -381,6 +381,23 @@ void InteractionTraceRecorder::recordStage(TraceStage stage, qint64 durationNs)
     m_frame->stageNs[size_t(stageIndex(stage))] += durationNs;
 }
 
+void InteractionTraceRecorder::recordAsyncWorkKinds(QStringList kinds)
+{
+    if (!m_enabled)
+    {
+        return;
+    }
+
+    kinds.removeAll(QString());
+    kinds.removeDuplicates();
+    std::sort(kinds.begin(), kinds.end());
+    m_activeAsyncWorkKinds = kinds;
+    if (m_frame.has_value())
+    {
+        m_frame->asyncWorkKinds = std::move(kinds);
+    }
+}
+
 void InteractionTraceRecorder::attributeSlowFrame(const OpenFrame& frame, qint64 durationNs)
 {
     const QJsonObject budget = budgetObject(m_config.refreshRateHz);
@@ -442,6 +459,21 @@ void InteractionTraceRecorder::endFrame()
     }
 
     attributeSlowFrame(frame, durationNs);
+
+    if (!frame.asyncWorkKinds.isEmpty())
+    {
+        ++m_framesWithAsyncWork;
+        const QJsonObject budget = budgetObject(m_config.refreshRateHz);
+        const double budgetMs = budget.value(QStringLiteral("frame_budget_ms")).toDouble(-1.0);
+        if (budgetMs > 0.0 && double(durationNs) / 1000000.0 > budgetMs)
+        {
+            ++m_slowFramesWithAsyncWork;
+            for (const QString& kind : frame.asyncWorkKinds)
+            {
+                ++m_asyncSlowFrameKinds[kind];
+            }
+        }
+    }
 
     for (auto it = m_pendingInputs.begin(); it != m_pendingInputs.end();)
     {
@@ -542,6 +574,24 @@ QJsonObject InteractionTraceRecorder::summary() const
     cache.insert(QStringLiteral("hits"), m_cacheHits);
     cache.insert(QStringLiteral("misses"), m_cacheMisses);
 
+    QJsonArray activeKinds;
+    for (const QString& kind : m_activeAsyncWorkKinds)
+    {
+        activeKinds.append(kind);
+    }
+    QJsonObject slowKinds;
+    QStringList slowKindNames = m_asyncSlowFrameKinds.keys();
+    std::sort(slowKindNames.begin(), slowKindNames.end());
+    for (const QString& kind : slowKindNames)
+    {
+        slowKinds.insert(kind, qint64(m_asyncSlowFrameKinds.value(kind)));
+    }
+    QJsonObject asyncWork;
+    asyncWork.insert(QStringLiteral("active_kinds"), activeKinds);
+    asyncWork.insert(QStringLiteral("frames_with_async_work"), qint64(m_framesWithAsyncWork));
+    asyncWork.insert(QStringLiteral("slow_frames_with_async_work"), qint64(m_slowFramesWithAsyncWork));
+    asyncWork.insert(QStringLiteral("slow_frame_kinds"), slowKinds);
+
     QJsonObject counts;
     counts.insert(QStringLiteral("inputs"), qint64(m_inputCount));
     counts.insert(QStringLiteral("frames"), qint64(m_frameCount));
@@ -559,6 +609,7 @@ QJsonObject InteractionTraceRecorder::summary() const
     root.insert(QStringLiteral("stage_ms"), stages);
     root.insert(QStringLiteral("slow_frame_causes"), slowCauses);
     root.insert(QStringLiteral("page_surface_cache"), cache);
+    root.insert(QStringLiteral("async_work"), asyncWork);
     root.insert(QStringLiteral("counts"), counts);
     return root;
 }
@@ -570,6 +621,8 @@ void InteractionTraceRecorder::reset()
     m_pendingInputs.clear();
     m_frameDurations.clear();
     m_inputLatencies.clear();
+    m_activeAsyncWorkKinds.clear();
+    m_asyncSlowFrameKinds.clear();
 
     for (QList<qint64>& samples : m_stageDurations)
     {
@@ -581,6 +634,8 @@ void InteractionTraceRecorder::reset()
     m_frameCount = 0;
     m_droppedInputRecords = 0;
     m_unbalancedFrames = 0;
+    m_framesWithAsyncWork = 0;
+    m_slowFramesWithAsyncWork = 0;
     m_cacheHits = 0;
     m_cacheMisses = 0;
 }

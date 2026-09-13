@@ -36,6 +36,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QtQml/qqml.h>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSettings>
@@ -254,6 +255,11 @@ int runQuickSmoke(QGuiApplication& application, EditorHost& host, const QString&
         engine.addImportPath(importPath);
     }
     engine.rootContext()->setContextProperty(QStringLiteral("editorHost"), &host);
+    qmlRegisterUncreatableType<EditorHost>("Loop.Quick",
+                                           1,
+                                           0,
+                                           "EditorHost",
+                                           QStringLiteral("EditorHost is provided by the shell context"));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &application,
                      [&application](QObject* object, const QUrl& url)
                      {
@@ -378,6 +384,11 @@ int main(int argc, char* argv[])
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("editorHost"), &host);
+    qmlRegisterUncreatableType<EditorHost>("Loop.Quick",
+                                           1,
+                                           0,
+                                           "EditorHost",
+                                           QStringLiteral("EditorHost is provided by the shell context"));
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &application,
                      [&application](QObject* object, const QUrl& url)

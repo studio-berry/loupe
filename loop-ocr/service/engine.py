@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import io
 import math
 import os
+import re
+import stat
 from typing import Any
 
 DEFAULT_LANGUAGES = ["en"]
 DEFAULT_MEDIA_BOX = {"x": 0.0, "y": 0.0, "width": 612.0, "height": 792.0}
 MAX_DPI = 1200
+
+# A staged page raster at 1200 dpi is large but bounded; anything past this is
+# not something PdfTool produced, so refuse it rather than loading it.
+MAX_IMAGE_BYTES = 512 * 1024 * 1024
+
+# Language codes are ISO 639-1/639-2 style tokens, optionally with a script or
+# region suffix ("ch_sim", "en"). Codes reach easyocr.Reader, which uses them to
+# build model file names, so they are shape-checked here: a value like
+# "../../etc" must never get that far.
+_LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:_[a-z]{2,4})?$")
 _readers: dict[tuple[str, ...], object] = {}
 
 
@@ -35,6 +48,10 @@ def normalize_languages(value: object) -> list[str]:
 
     if not languages:
         return list(DEFAULT_LANGUAGES)
+
+    for language in languages:
+        if not _LANGUAGE_PATTERN.match(language):
+            raise ValueError(f"language code is not a valid identifier: {language!r}")
 
     return sorted(set(languages))
 
@@ -166,6 +183,33 @@ def pixel_bbox_to_pdf(
     }
 
 
+def _read_staged_image(image_path: str) -> bytes:
+    """Reads a staged page raster exactly once, by descriptor.
+
+    PdfTool stages the raster into a private temporary directory and hands us the
+    path. Re-resolving that path for every use - an existence check, then PIL,
+    then the OCR reader - is three chances for the file behind the name to change
+    between them. Opening once and passing the bytes onward removes the window,
+    and O_NOFOLLOW (where the platform has it) refuses a name that has been
+    turned into a symlink.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(image_path, flags)
+    try:
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode):
+            raise ValueError("staged image is not a regular file")
+        if status.st_size > MAX_IMAGE_BYTES:
+            raise ValueError(f"staged image exceeds {MAX_IMAGE_BYTES} bytes")
+
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
+            return handle.read()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def run_ocr(request: dict[str, Any]) -> dict[str, Any]:
     from PIL import Image
 
@@ -179,14 +223,18 @@ def run_ocr(request: dict[str, Any]) -> dict[str, Any]:
     if not image_path:
         return {"page": page, "ok": False, "error": "missing image path"}
 
-    if not os.path.isfile(image_path):
+    try:
+        image_bytes = _read_staged_image(image_path)
+    except FileNotFoundError:
         return {"page": page, "ok": False, "error": f"image not found: {image_path}"}
+    except (IsADirectoryError, OSError, ValueError) as error:
+        return {"page": page, "ok": False, "error": f"image could not be read: {error}"}
 
     reader = get_reader(list(languages))
-    with Image.open(image_path) as image:
+    with Image.open(io.BytesIO(image_bytes)) as image:
         image_width, image_height = image.size
 
-    results = reader.readtext(image_path)
+    results = reader.readtext(image_bytes)
     lines = []
     text_parts: list[str] = []
     for bbox_pixels, text, confidence in results:

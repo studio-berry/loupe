@@ -66,6 +66,12 @@ public:
     inline explicit PDFMarkedObjectsContext() = default;
 
     inline bool isMarked(PDFObjectReference reference) const { return m_markedReferences.count(reference); }
+
+    /// Number of references currently marked. Marks are held by
+    /// PDFMarkedObjectsLock for exactly the span of the traversal that owns
+    /// them, so for a depth-first walk this is the depth of the current path -
+    /// which is what a recursive parser needs to bound its own recursion.
+    inline size_t getMarkedCount() const { return m_markedReferences.size(); }
     inline void mark(PDFObjectReference reference) { m_markedReferences.insert(reference); }
     inline void unmark(PDFObjectReference reference) { m_markedReferences.erase(reference); }
 
@@ -93,7 +99,6 @@ public:
     explicit inline PDFMarkedObjectsLock(PDFMarkedObjectsContext* context, const PDFObject& object) :
         PDFMarkedObjectsLock(context, object.isReference() ? object.getReference() : PDFObjectReference())
     {
-
     }
 
     inline ~PDFMarkedObjectsLock()
@@ -117,7 +122,6 @@ private:
 class LOOPLIBCORESHARED_EXPORT PDFObjectClassifier
 {
 public:
-
     inline PDFObjectClassifier() = default;
 
     /// Performs object classification on a document. Old classification
@@ -127,18 +131,18 @@ public:
 
     enum Type : uint32_t
     {
-        None            = 0x00000000,
-        Page            = 0x00000001,
-        ContentStream   = 0x00000002,
-        GraphicState    = 0x00000004,
-        ColorSpace      = 0x00000008,
-        Pattern         = 0x00000010,
-        Shading         = 0x00000020,
-        Image           = 0x00000040,
-        Form            = 0x00000080,
-        Font            = 0x00000100,
-        Action          = 0x00000200,
-        Annotation      = 0x00000400
+        None = 0x00000000,
+        Page = 0x00000001,
+        ContentStream = 0x00000002,
+        GraphicState = 0x00000004,
+        ColorSpace = 0x00000008,
+        Pattern = 0x00000010,
+        Shading = 0x00000020,
+        Image = 0x00000040,
+        Form = 0x00000080,
+        Font = 0x00000100,
+        Action = 0x00000200,
+        Annotation = 0x00000400
     };
 
     Q_DECLARE_FLAGS(Types, Type)
@@ -162,7 +166,6 @@ public:
             count(0),
             bytes(0)
         {
-
         }
 
         std::atomic<qint64> count;
@@ -171,7 +174,7 @@ public:
 
     struct Statistics
     {
-        std::array<qint64, size_t(PDFObject::Type::LastType)> objectCountByType = { };
+        std::array<qint64, size_t(PDFObject::Type::LastType)> objectCountByType = {};
         std::map<Type, StatisticsItem> statistics;
     };
 
@@ -198,6 +201,6 @@ private:
     Types m_allTypesUsed;
 };
 
-} // namespace pdf
+}   // namespace pdf
 
-#endif // PDFOBJECTUTILS_H
+#endif   // PDFOBJECTUTILS_H

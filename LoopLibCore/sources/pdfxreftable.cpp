@@ -42,9 +42,15 @@ void PDFXRefTable::readXRefTable(PDFParsingContext* context, const QByteArray& b
 
     m_entries.clear();
 
-    // Entry count is bounded by the document size - each object described
-    // by the cross-reference table occupies at least one byte in the document.
-    const PDFInteger maximalEntryCount = static_cast<PDFInteger>(byteArray.size());
+    // The entry count is bounded by the bytes that could describe the entries. A
+    // conforming record is 20 bytes (ten digits, space, five digits, space, "f",
+    // space, then CR LF); the lenient parser here also accepts the shortest useful
+    // form ("0 0 f\n"), which is 6. Using the file length alone (one declared slot
+    // per byte) let a small file force a multi-gigabyte dense entry vector, because
+    // a table may declare slots it never fills - a sparse /Size is not a promise of
+    // that many records.
+    constexpr PDFInteger XREF_MINIMUM_BYTES_PER_ENTRY = 6;
+    const PDFInteger maximalEntryCount = static_cast<PDFInteger>(byteArray.size()) / XREF_MINIMUM_BYTES_PER_ENTRY;
 
     std::set<PDFInteger> processedOffsets;
     std::stack<PDFInteger> workSet;
@@ -316,7 +322,7 @@ void PDFXRefTable::readXRefTable(PDFParsingContext* context, const QByteArray& b
                             m_entries.resize(currentDesiredSize);
                         }
 
-                        for (PDFInteger objectNumber = firstObjectNumber; objectNumber <= lastObjectIndex; ++ objectNumber)
+                        for (PDFInteger objectNumber = firstObjectNumber; objectNumber <= lastObjectIndex; ++objectNumber)
                         {
                             int itemType = readNumber(columnTypeBytes, 1);
                             int itemObjectNumberOfObjectStreamOrByteOffset = readNumber(columnObjectNumberOrByteOffsetBytes, 0);
@@ -380,7 +386,8 @@ std::vector<PDFXRefTable::Entry> PDFXRefTable::getOccupiedEntries() const
 
     // Suppose majority of items are occupied
     result.reserve(m_entries.size());
-    std::copy_if(m_entries.cbegin(), m_entries.cend(), std::back_inserter(result), [](const Entry& entry) { return entry.type == EntryType::Occupied; });
+    std::copy_if(m_entries.cbegin(), m_entries.cend(), std::back_inserter(result), [](const Entry& entry)
+                 { return entry.type == EntryType::Occupied; });
 
     return result;
 }
@@ -391,7 +398,8 @@ std::vector<PDFXRefTable::Entry> PDFXRefTable::getObjectStreamEntries() const
 
     // Suppose majority of items are occupied
     result.reserve(m_entries.size());
-    std::copy_if(m_entries.cbegin(), m_entries.cend(), std::back_inserter(result), [](const Entry& entry) { return entry.type == EntryType::InObjectStream; });
+    std::copy_if(m_entries.cbegin(), m_entries.cend(), std::back_inserter(result), [](const Entry& entry)
+                 { return entry.type == EntryType::InObjectStream; });
 
     return result;
 }

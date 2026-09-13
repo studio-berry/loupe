@@ -159,6 +159,14 @@ Item {
             host: root.host
             Accessible.name: qsTr("Document canvas pane")
         }
+
+        InspectorPane {
+            id: inspectorPane
+            Layout.preferredWidth: 280
+            Layout.fillHeight: true
+            host: root.host
+            Accessible.name: qsTr("Contextual inspector dock")
+        }
     }
 
     Connections {

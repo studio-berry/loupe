@@ -250,6 +250,11 @@ struct PDFToolOptions
     bool destructiveReport = false;
     bool destructiveOverwrite = false;
 
+    // Shared empty-result policy (fetch-images, fetch-text, attachments --save).
+    // Extraction commands are informational by default - "this document has no
+    // figures" is a legitimate answer - so the fail-closed reading is opt-in.
+    bool failIfEmpty = false;
+
     // For option 'PreflightProfile'
     QString preflightProfilePath;
     QString preflightJobContextPath;
@@ -400,6 +405,7 @@ public:
         Repair = 0x800000000ULL,   ///< Transactional prepress-safe repair operation
         ActionList = 0x1000000000ULL,   ///< Reusable declarative Action List execution
         RenderPage = 0x4000000000ULL,   ///< Settings for render-page STCH contract
+        EmptyResultPolicy = 0x8000000000ULL,   ///< Shared --fail-if-empty for extraction commands
     };
     Q_DECLARE_FLAGS(Options, Option)
 
@@ -433,6 +439,20 @@ protected:
                           const QString& code,
                           const QString& message,
                           QJsonObject context = QJsonObject()) const;
+
+    /// Reports that an extraction command completed without producing anything and
+    /// returns the exit code the command should use. Extraction is informational by
+    /// default: a document with no figures is not an error, so without
+    /// --fail-if-empty this records an `output.empty-result` note and returns
+    /// \p successCode. With --fail-if-empty it raises the same code to an error and
+    /// returns PDFToolExitCode::Findings, so a pipeline that gates on "figures were
+    /// produced" cannot be green-lit by an empty output directory.
+    /// \param options Options (carries execution context, output style, and the flag)
+    /// \param subject What was not produced, for the message (e.g. "images")
+    /// \param successCode Exit code to return when the flag was not requested
+    PDFToolExitCode reportEmptyResult(const PDFToolOptions& options,
+                                      const QString& subject,
+                                      PDFToolExitCode successCode = PDFToolExitCode::Success) const;
 
     /// Tries to read the document. If document is successfully read, true is returned,
     /// if error occurs, then false is returned. Optionally, original document content

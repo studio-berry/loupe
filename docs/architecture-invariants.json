@@ -135,6 +135,11 @@
       "id": "I27",
       "title": "The Quick canvas accessible tree has one privacy-safe canvas node and no tile-level children",
       "test_targets": ["UnitTestsQuickAccessibility"]
+    },
+    {
+      "id": "I28",
+      "title": "Incomplete inspection and waived findings never render as passed",
+      "test_targets": ["UnitTestsLoopStateVisual"]
     }
   ]
 }

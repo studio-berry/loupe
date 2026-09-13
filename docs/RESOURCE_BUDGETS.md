@@ -143,3 +143,30 @@ unbounded or “disable all limits” mode.
 The budget is reset at the start of a reader operation and preflight run. A
 session reset clears accounting and caches; document mutation still requires
 the existing `PDFDocumentSession::invalidate()` call.
+
+## Residual gaps
+
+Three decode paths were audited against the budget and are recorded here rather
+than closed:
+
+- **Output-intent profiles (closed).** `PDFCMSManager::setDocument()` now takes
+  the caller's `PDFProcessingBudget` and decodes `/DestOutputProfile` streams
+  with it (`PDFDocumentSession::initializeRendering()` passes the session
+  budget). A budget failure is no longer swallowed by the "this profile failed
+  to parse" `catch` - `PDFBudgetExceededException` is rethrown, so the operation
+  stays incomplete instead of continuing with the remaining intents. Callers
+  that still use the one-argument overload pass no budget and keep the
+  per-stream ceiling only.
+- **The inline-image Flate length probe (closed).**
+  `PDFFlateDecodeFilter::getStreamDataLength()` used to inflate to the end of
+  the stream just to learn a length, with no ceiling and no cancellation
+  accounting. It now stops at `maxAllowedDecompressedSize()` - the same
+  per-stream ceiling the decode path enforces - and returns `-1`, which both
+  callers (`pdfpagecontentprocessor.cpp`, `pdfdocumentsanitizer.cpp`) already
+  handle by scanning for the `EI` operator instead.
+- **`PDFFunction::createFunction()` (open, deferred).** A function's stream is
+  decoded without a budget (`pdffunction.cpp`), so it is bounded per stream by
+  the hard 256 MiB / 256x ceilings but not cumulatively or by elapsed time.
+  Threading a budget through it changes an exported signature, which is a
+  contract-level decision for the fixup classes as well; the same is true of the
+  fixups that construct renderers without a budget. Deferred, not dismissed.

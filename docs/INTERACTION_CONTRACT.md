@@ -263,6 +263,19 @@ into the vocabulary the issue asks a reader to act on:
 must not have a cause invented for it, but it is not nothing either: if an
 expensive job was in flight across it, the overlap is the finding.
 
+`LoopLibInteraction/sources/interactiontracecontract.h` gives both tables a
+type: `TraceContract` and `TracePhase` enumerate them in the order above,
+`phaseForStage()` is the `TraceStage` → phase table, and
+`evaluateTraceContracts()` folds an ordered `QList<TraceContractCheck>` into
+the `passed` / `first_violated_contract` / `responsible_phase` /
+`failure_excerpt` shape of one report `run` -- the first unsatisfied check
+decides the verdict and no later one is consulted, so a caller that supplies
+the nine checks in contract order gets AC7 for free. It knows nothing about
+`InteractionController`, replay, or `PDFJobScheduler`; a harness populates the
+checks from those and calls it, which is what keeps the evaluator itself
+testable with synthetic checks rather than a live replay.
+`UnitTestsInteractionTraceContract` covers it.
+
 ### Scenarios ahead of the harness
 
 A manifest entry may carry `blocked_on` with a `blocked_reason`. Such a
@@ -273,6 +286,13 @@ wired up.
 
 ## Not in this session
 
+- The `UnitTestsInteractionTraces` / `UnitTestsInteractionTracesPresent` binaries the two-lanes
+  table above names: replaying a corpus scenario against `InteractionController`, applying the
+  cost model, counting hit-test candidates and async-job overlap, and assembling a full report
+  `run` (of which `evaluateTraceContracts()` decides only the `passed` /
+  `first_violated_contract` / `responsible_phase` / `failure_excerpt` fields) remain open. Until
+  they land, every corpus scenario stays validated as data by
+  `check_interaction_traces.py --corpus-only` but produces no run.
 - The developer-facing trace overlay and GPU/present timing from issue #140. Neither can exist
   in a layer that links no QML and no scene graph. **Delivered in P4-S5** by `LoopLibQuick`:
   `CanvasTraceOverlay` renders the recorder's privacy-safe summary, and `CanvasPresentMetrics`

@@ -30,6 +30,10 @@ qt_add_qml_module(ProductQuickAccessibilitySmoke
         qml/InspectorPane.qml
         qml/DocumentPane.qml
         qml/CanvasPane.qml
+        qml/WorkspacePlaceholderPane.qml
+        qml/ShellToolBar.qml
+        qml/ShellMenuBar.qml
+        qml/MenuModel.qml
 )
 
 target_link_libraries(ProductQuickAccessibilitySmoke

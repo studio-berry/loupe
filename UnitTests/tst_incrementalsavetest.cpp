@@ -27,6 +27,34 @@
 #include <QtTest>
 #include <QBuffer>
 #include <QDateTime>
+#include <QFile>
+#include <QTemporaryDir>
+
+namespace
+{
+
+// Both incremental-writer entry points must exist as distinct exported
+// functions: the original four-argument signatures are what existing binaries
+// link against, so giving them a defaulted fifth parameter (which changes the
+// mangled symbol and makes a four-argument call ambiguous) is a break even
+// though it compiles here.
+using FourArgumentFileWriter = pdf::PDFOperationResult (pdf::PDFDocumentWriter::*)(
+    const QString&, const pdf::PDFDocument*, const pdf::PDFDocument*, bool);
+using FiveArgumentFileWriter = pdf::PDFOperationResult (pdf::PDFDocumentWriter::*)(
+    const QString&, const pdf::PDFDocument*, const pdf::PDFDocument*, bool,
+    pdf::PDFDocumentWriter::IncrementalWriteOutcome*);
+using FourArgumentDeviceWriter = pdf::PDFOperationResult (pdf::PDFDocumentWriter::*)(
+    QIODevice*, const QByteArray&, const pdf::PDFDocument*, const pdf::PDFDocument*);
+using FiveArgumentDeviceWriter = pdf::PDFOperationResult (pdf::PDFDocumentWriter::*)(
+    QIODevice*, const QByteArray&, const pdf::PDFDocument*, const pdf::PDFDocument*,
+    pdf::PDFDocumentWriter::IncrementalWriteOutcome*);
+
+constexpr FourArgumentFileWriter fileWriterFour = static_cast<FourArgumentFileWriter>(&pdf::PDFDocumentWriter::writeIncremental);
+constexpr FiveArgumentFileWriter fileWriterFive = static_cast<FiveArgumentFileWriter>(&pdf::PDFDocumentWriter::writeIncremental);
+constexpr FourArgumentDeviceWriter deviceWriterFour = static_cast<FourArgumentDeviceWriter>(&pdf::PDFDocumentWriter::writeIncremental);
+constexpr FiveArgumentDeviceWriter deviceWriterFive = static_cast<FiveArgumentDeviceWriter>(&pdf::PDFDocumentWriter::writeIncremental);
+
+}   // namespace
 
 class IncrementalSaveTest : public QObject
 {
@@ -35,10 +63,13 @@ class IncrementalSaveTest : public QObject
 private slots:
     void preservesOriginalPrefixAndChangedObjects();
     void rejectsChangedSourceBytes();
+    void reportsWhetherTheSaveAppendedOrOnlyCopied();
+    void refusalsNameTheirReason();
     void selectsSafeWritePolicy();
     void signedPdfIncrementalSave_preservesSignedPrefix();
     void explicitPoliciesCannotBeDowngradedToIncremental();
     void unclassifiedAndRedactionPoliciesCannotSilentIncrementalAppend();
+    void fileOverloadReportsWhatItDid();
 };
 
 namespace
@@ -133,6 +164,76 @@ void IncrementalSaveTest::rejectsChangedSourceBytes()
     output.open(QIODevice::WriteOnly);
     QVERIFY(!writer.writeIncremental(&output, originalData + QByteArrayLiteral("changed"), &original, modified.data()));
     QVERIFY(output.data().isEmpty());
+}
+
+void IncrementalSaveTest::reportsWhetherTheSaveAppendedOrOnlyCopied()
+{
+    const QByteArray originalData = writeDocument(createDocument());
+    pdf::PDFDocumentReader reader(nullptr, [](bool*)
+                                  { return QString(); }, true, false);
+    const pdf::PDFDocument original = reader.readFromBuffer(originalData);
+    QVERIFY(reader.getReadingResult() == pdf::PDFDocumentReader::Result::OK);
+
+    // A real change appends.
+    {
+        const pdf::PDFDocumentPointer modified = createModifiedDocument(original);
+        QVERIFY(modified);
+
+        pdf::PDFDocumentWriter writer(nullptr);
+        QBuffer output;
+        output.open(QIODevice::WriteOnly);
+
+        auto outcome = pdf::PDFDocumentWriter::IncrementalWriteOutcome::CopiedUnchanged;
+        QVERIFY(writer.writeIncremental(&output, originalData, &original, modified.data(), &outcome));
+        QCOMPARE(outcome, pdf::PDFDocumentWriter::IncrementalWriteOutcome::Appended);
+    }
+
+    // Saving a document against itself produces the right bytes, but it is a
+    // copy rather than an append - and the caller must be able to tell, because
+    // the two are indistinguishable from the success value alone.
+    {
+        pdf::PDFDocumentWriter writer(nullptr);
+        QBuffer output;
+        output.open(QIODevice::WriteOnly);
+
+        auto outcome = pdf::PDFDocumentWriter::IncrementalWriteOutcome::Appended;
+        QVERIFY(writer.writeIncremental(&output, originalData, &original, &original, &outcome));
+        QCOMPARE(outcome, pdf::PDFDocumentWriter::IncrementalWriteOutcome::CopiedUnchanged);
+        QCOMPARE(output.data(), originalData);
+    }
+}
+
+void IncrementalSaveTest::refusalsNameTheirReason()
+{
+    // Every refusal to append must say which condition stopped it, not just
+    // "operation failed" - the caller has to know whether to retry as a full
+    // rewrite or to stop.
+    const QByteArray originalData = writeDocument(createDocument());
+    pdf::PDFDocumentReader reader(nullptr, [](bool*)
+                                  { return QString(); }, true, false);
+    const pdf::PDFDocument original = reader.readFromBuffer(originalData);
+    const pdf::PDFDocumentPointer modified = createModifiedDocument(original);
+    QVERIFY(modified);
+
+    pdf::PDFDocumentWriter writer(nullptr);
+
+    {
+        QBuffer output;
+        output.open(QIODevice::WriteOnly);
+        const pdf::PDFOperationResult result = writer.writeIncremental(&output, originalData + QByteArrayLiteral("changed"), &original, modified.data());
+        QVERIFY(!result);
+        QVERIFY2(result.getErrorMessage().contains(QStringLiteral("source PDF changed")),
+                 qPrintable(result.getErrorMessage()));
+    }
+
+    {
+        QBuffer output;
+        output.open(QIODevice::WriteOnly);
+        const pdf::PDFOperationResult result = writer.writeIncremental(&output, QByteArrayLiteral("not a pdf"), &original, modified.data());
+        QVERIFY(!result);
+        QVERIFY2(result.getErrorMessage().contains(QStringLiteral("missing or invalid")),
+                 qPrintable(result.getErrorMessage()));
+    }
 }
 
 void IncrementalSaveTest::selectsSafeWritePolicy()
@@ -232,6 +333,51 @@ void IncrementalSaveTest::unclassifiedAndRedactionPoliciesCannotSilentIncrementa
 
     const pdf::PDFOperationSavePolicy mergedUnclassified = pdf::mergePDFSavePolicies(incremental, unclassified);
     QCOMPARE(mergedUnclassified.mode, pdf::PDFSaveMode::SaveAsNewArtifact);
+}
+
+void IncrementalSaveTest::fileOverloadReportsWhatItDid()
+{
+    const QByteArray originalData = writeDocument(createDocument());
+    pdf::PDFDocumentReader reader(nullptr, [](bool*)
+                                  { return QString(); }, true, false);
+    const pdf::PDFDocument original = reader.readFromBuffer(originalData);
+    QVERIFY(reader.getReadingResult() == pdf::PDFDocumentReader::Result::OK);
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("incremental.pdf"));
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(file.write(originalData), qint64(originalData.size()));
+    }
+
+    pdf::PDFDocumentWriter writer(nullptr);
+
+    // A real change appends, and the caller is told so.
+    {
+        const pdf::PDFDocumentPointer modified = createModifiedDocument(original);
+        QVERIFY(modified);
+        auto outcome = pdf::PDFDocumentWriter::IncrementalWriteOutcome::CopiedUnchanged;
+        QVERIFY(writer.writeIncremental(path, &original, modified.data(), true, &outcome));
+        QCOMPARE(outcome, pdf::PDFDocumentWriter::IncrementalWriteOutcome::Appended);
+    }
+
+    // Saving a document against itself copies the bytes verbatim: success, but
+    // not an append, and the caller must be able to tell the two apart. The
+    // file is rewritten first: the append above changed the bytes on disk, and
+    // the writer refuses to touch a file that no longer matches the in-memory
+    // original it was handed.
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(file.write(originalData), qint64(originalData.size()));
+        file.close();
+
+        auto outcome = pdf::PDFDocumentWriter::IncrementalWriteOutcome::Appended;
+        QVERIFY(writer.writeIncremental(path, &original, &original, true, &outcome));
+        QCOMPARE(outcome, pdf::PDFDocumentWriter::IncrementalWriteOutcome::CopiedUnchanged);
+    }
 }
 
 QTEST_MAIN(IncrementalSaveTest)

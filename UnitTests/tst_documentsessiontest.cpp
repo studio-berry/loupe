@@ -21,12 +21,18 @@
 // SOFTWARE.
 
 #include "pdfdocumentsession.h"
+#include "pdfcms.h"
 #include "pdfdocumentcontext.h"
 #include "pdfdocumentbuilder.h"
+#include "pdfdocumentreader.h"
 #include "pdfjobscheduler.h"
 #include "pdfobject.h"
+#include "pdfprocessingbudget.h"
 
 #include <QtTest>
+
+#include <QByteArray>
+#include <QRegularExpression>
 
 #include <atomic>
 #include <chrono>
@@ -45,7 +51,52 @@ private slots:
     void revisionFence_rejectsSupersededResults();
     void concurrentScheduledResults_rejectSupersededRevisions();
     void setDocument_ownedPointerBindsTheDocument();
+    void test_readerBoundsDeclaredXrefEntriesByFileBytes();
+    void test_readerBoundsObjectTableByObjectBudget();
+    void test_outputIntentProfileDecodeIsChargedToTheBudget();
 };
+
+namespace
+{
+
+/// Builds a document with a single output intent whose /DestOutputProfile stream
+/// carries `profileContent` compressed with /Filter /FlateDecode.
+///
+/// This duplicates the output-intent fixture of `tst_preflightenginetest.cpp`
+/// on purpose: sharing it between two test executables would need a common test
+/// target, which this change set deliberately avoids.
+pdf::PDFDocument buildDocumentWithOutputIntentProfile(const QByteArray& profileContent)
+{
+    pdf::PDFDocumentBuilder builder;
+    builder.appendPage(QRectF(0, 0, 200, 200));
+
+    pdf::PDFDictionary profileDictionary;
+    profileDictionary.addEntry(pdf::PDFInplaceOrMemoryString("N"), pdf::PDFObject::createInteger(3));
+    profileDictionary.addEntry(pdf::PDFInplaceOrMemoryString("Filter"), pdf::PDFObject::createName("FlateDecode"));
+    profileDictionary.addEntry(pdf::PDFInplaceOrMemoryString("Length"), pdf::PDFObject::createInteger(profileContent.size()));
+    const pdf::PDFObjectReference profileReference = builder.addObject(
+        pdf::PDFObject::createStream(std::make_shared<pdf::PDFStream>(std::move(profileDictionary), QByteArray(profileContent))));
+
+    pdf::PDFDictionary intentDictionary;
+    intentDictionary.addEntry(pdf::PDFInplaceOrMemoryString("Type"), pdf::PDFObject::createName("OutputIntent"));
+    intentDictionary.addEntry(pdf::PDFInplaceOrMemoryString("S"), pdf::PDFObject::createName("GTS_PDFX"));
+    intentDictionary.addEntry(pdf::PDFInplaceOrMemoryString("OutputConditionIdentifier"), pdf::PDFObject::createString("Loop-Test"));
+    intentDictionary.addEntry(pdf::PDFInplaceOrMemoryString("DestOutputProfile"), pdf::PDFObject::createReference(profileReference));
+    const pdf::PDFObjectReference intentReference = builder.addObject(
+        pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(std::move(intentDictionary))));
+
+    pdf::PDFArray outputIntents;
+    outputIntents.appendItem(pdf::PDFObject::createReference(intentReference));
+
+    pdf::PDFDictionary catalog;
+    catalog.addEntry(pdf::PDFInplaceOrMemoryString("OutputIntents"),
+                     pdf::PDFObject::createArray(std::make_shared<pdf::PDFArray>(std::move(outputIntents))));
+    builder.mergeTo(builder.getCatalogReference(), pdf::PDFObject::createDictionary(std::make_shared<pdf::PDFDictionary>(std::move(catalog))));
+
+    return builder.build();
+}
+
+}   // namespace
 
 void DocumentSessionTest::nullDocument_sessionIsInvalid()
 {
@@ -279,6 +330,216 @@ void DocumentSessionTest::concurrentScheduledResults_rejectSupersededRevisions()
         QCOMPARE(currentSnapshot.status, pdf::PDFJobStatus::Succeeded);
         QCOMPARE(currentSnapshot.documentRevision, currentRevision.toString());
     }
+}
+
+void DocumentSessionTest::test_readerBoundsDeclaredXrefEntriesByFileBytes()
+{
+    // A complete, readable document whose cross-reference section declares one
+    // slot per byte of the file: a second subsection that declares object 250000
+    // in a 256 KiB file. The old bound (one declared slot per file byte) accepted
+    // it, and the reader resized a dense PDFXRefTable::Entry vector - and then a
+    // second dense object table of the same cardinality - to 250001 entries, from
+    // a file that carries a single free record at that number. A conforming
+    // record is 20 bytes (ten digits, space, five digits, space, "f", space, then
+    // CR LF) and the lenient parser here also accepts the 6-byte "0 0 f\n" form,
+    // so the declared count is bounded by byteArray.size() / 6.
+    //
+    // The fixture is deliberately a *valid* document (real catalog/pages/page
+    // graph, correct offsets, /Root in the trailer) so that a reader without the
+    // floor reads it as Result::OK: the test only discriminates if the same bytes
+    // are accepted without the guard.
+    //
+    // This guard lives in PDFXRefTable::readXRefTable, but PDFXRefTable is not an
+    // exported class (it has no LOOPLIBCORESHARED_EXPORT), so a direct unit test
+    // against it does not link - LNK2019 unresolved external symbol
+    // readXRefTable@PDFXRefTable@pdf@@... - and every UnitTests target links only
+    // LoopLibCore.lib. The guard is therefore exercised through the exported
+    // reader, which is the same entry point a hostile file takes.
+    constexpr int DECLARED_FIRST_OBJECT_NUMBER = 250000;
+    constexpr int BUFFER_BYTES = 256 * 1024;
+
+    QByteArray buffer = "%PDF-1.5\n";
+
+    const auto appendObject = [&buffer](int objectNumber, const QByteArray& body)
+    {
+        const int offset = buffer.size();
+        buffer.append(QByteArray::number(objectNumber));
+        buffer.append(" 0 obj\n");
+        buffer.append(body);
+        buffer.append("endobj\n");
+        return offset;
+    };
+
+    const auto occupiedRecord = [](int objectOffset)
+    { return QByteArray::number(objectOffset).rightJustified(10, '0') + " 00000 n \n"; };
+
+    const int catalogOffset = appendObject(1, "<< /Type /Catalog /Pages 2 0 R >>\n");
+    const int pagesOffset = appendObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>\n");
+    const int pageOffset = appendObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\n");
+
+    QByteArray section = "xref\n0 4\n";
+    section.append("0000000000 65535 f \n");
+    section.append(occupiedRecord(catalogOffset));
+    section.append(occupiedRecord(pagesOffset));
+    section.append(occupiedRecord(pageOffset));
+    section.append(QByteArray::number(DECLARED_FIRST_OBJECT_NUMBER));
+    section.append(" 1\n0000000000 65535 f \n");
+    section.append("trailer\n<< /Size ");
+    section.append(QByteArray::number(DECLARED_FIRST_OBJECT_NUMBER + 1));
+    section.append(" /Root 1 0 R >>\n");
+
+    const int xrefOffset = BUFFER_BYTES - section.size() - 40;
+    buffer.append(QByteArray(xrefOffset - buffer.size(), '\n'));
+    buffer.append(section);
+
+    const QByteArray tail = QByteArray("startxref\n") + QByteArray::number(xrefOffset) + "\n%%EOF\n";
+    buffer.append(tail);
+
+    auto noPassword = [](bool*)
+    { return QString(); };
+    pdf::PDFDocumentReader reader(nullptr, noPassword, false, false);
+    reader.readFromBuffer(buffer);
+
+    QVERIFY2(reader.getReadingResult() != pdf::PDFDocumentReader::Result::OK,
+             qPrintable(QStringLiteral("a table declaring one slot per file byte must be refused, reader said: %1").arg(reader.getErrorMessage())));
+    QVERIFY2(reader.getErrorMessage().contains(QStringLiteral("reference table")), qPrintable(reader.getErrorMessage()));
+}
+
+void DocumentSessionTest::test_readerBoundsObjectTableByObjectBudget()
+{
+    // A complete, readable document whose /Size declares far more objects than
+    // the operation's object budget allows. The reader allocates a dense object
+    // table for every declared slot - including the free and never-referenced
+    // ones - so the declared cardinality, not the number of occupied entries, is
+    // what must fit the object budget. The fixture is deliberately a *valid*
+    // document (real catalog/pages/page graph, matching /Size, correct offsets)
+    // so that a reader without the ceiling accepts it: the test only
+    // discriminates if the same bytes read as Result::OK without the ceiling.
+    QByteArray buffer = "%PDF-1.5\n";
+
+    const auto appendObject = [&buffer](int objectNumber, const QByteArray& body)
+    {
+        const int offset = buffer.size();
+        buffer.append(QByteArray::number(objectNumber));
+        buffer.append(" 0 obj\n");
+        buffer.append(body);
+        buffer.append("endobj\n");
+        return offset;
+    };
+
+    const int catalogOffset = appendObject(1, "<< /Type /Catalog /Pages 2 0 R >>\n");
+    const int pagesOffset = appendObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>\n");
+    const int pageOffset = appendObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\n");
+
+    constexpr int DECLARED_OBJECT_COUNT = 9002;
+
+    QByteArray records;
+    for (int objectNumber = 0; objectNumber < DECLARED_OBJECT_COUNT; ++objectNumber)
+    {
+        int offset = -1;
+        if (objectNumber == 1)
+        {
+            offset = catalogOffset;
+        }
+        else if (objectNumber == 2)
+        {
+            offset = pagesOffset;
+        }
+        else if (objectNumber == 3)
+        {
+            offset = pageOffset;
+        }
+
+        if (offset >= 0)
+        {
+            records.append(QByteArray::number(offset).rightJustified(10, '0'));
+            records.append(" 00000 n \n");
+        }
+        else
+        {
+            records.append("0000000000 65535 f \n");
+        }
+    }
+
+    const int xrefOffset = buffer.size();
+    buffer.append("xref\n0 ");
+    buffer.append(QByteArray::number(DECLARED_OBJECT_COUNT));
+    buffer.append("\n");
+    buffer.append(records);
+    buffer.append("trailer\n<< /Size ");
+    buffer.append(QByteArray::number(DECLARED_OBJECT_COUNT));
+    buffer.append(" /Root 1 0 R >>\nstartxref\n");
+    buffer.append(QByteArray::number(xrefOffset));
+    buffer.append("\n%%EOF\n");
+
+    pdf::PDFProcessingLimits limits = pdf::PDFProcessingLimits::conservativeDefaults();
+    limits.maxObjectsVisited = 100;
+
+    auto noPassword = [](bool*)
+    { return QString(); };
+    pdf::PDFDocumentReader reader(nullptr, noPassword, false, false, limits);
+    reader.readFromBuffer(buffer);
+
+    QVERIFY2(reader.getReadingResult() != pdf::PDFDocumentReader::Result::OK,
+             qPrintable(QStringLiteral("the declared cardinality must be refused, reader said: %1").arg(reader.getErrorMessage())));
+
+    // The refusal must name the document-model object budget and stay
+    // attributable, exactly as the per-object charge would: the corpus fixture
+    // "pathological-object-count" (UnitTests/testdata/budget_exhaustion) pins the
+    // reader's object-budget failure to that kind and to its attempted/limit
+    // numbers, so a declared cardinality larger than the budget is the same
+    // failure reported earlier.
+    const QString message = reader.getErrorMessage();
+    QVERIFY2(message.contains(QStringLiteral("objects-visited")), qPrintable(message));
+
+    const QRegularExpression numbers(QStringLiteral("attempted (\\d+), limit (\\d+)"));
+    const QRegularExpressionMatch match = numbers.match(message);
+    QVERIFY2(match.hasMatch(), qPrintable(message));
+    QCOMPARE(match.captured(1).toLongLong(), qint64(DECLARED_OBJECT_COUNT));
+    QCOMPARE(match.captured(2).toLongLong(), qint64(100));
+}
+
+void DocumentSessionTest::test_outputIntentProfileDecodeIsChargedToTheBudget()
+{
+    // 1 MiB of zeros compresses to ~1 KiB, so this is a legal-length stream that
+    // inflates past a tightened single-stream ceiling. Decoding it without the
+    // budget (the old PDFCMSManager::setDocument) bypassed the cumulative and
+    // elapsed accounting entirely.
+    //
+    // qCompress() prepends a four-byte uncompressed-size header, but the stream
+    // declares /Filter /FlateDecode, which needs the zlib stream itself - so the
+    // fixture strips the prefix (with it, the decode fails as a malformed stream
+    // instead of tripping the budget).
+    QByteArray zeros(1024 * 1024, '\0');
+    const QByteArray bomb = qCompress(zeros, 9).mid(4);
+
+    pdf::PDFDocument document = buildDocumentWithOutputIntentProfile(bomb);
+
+    pdf::PDFProcessingLimits limits = pdf::PDFProcessingLimits::conservativeDefaults();
+    limits.maxDecodedStreamBytes = 4096;
+    limits.maxDecompressionRatio = 4;
+
+    pdf::PDFProcessingBudget budget(limits);
+    pdf::PDFCMSManager manager(nullptr);
+
+    QVERIFY_THROWS_EXCEPTION(pdf::PDFBudgetExceededException, manager.setDocument(&document, &budget));
+    QVERIFY(budget.limits().maxDecodedStreamBytes == 4096);
+
+    // A caller that passes no budget still swallows the same bomb: the per-stream
+    // ceiling reports it as a profile that failed to parse, and the cumulative
+    // accounting never sees it. That residual gap is what docs/RESOURCE_BUDGETS.md
+    // records as deferred.
+    bool budgetFailurePropagated = false;
+    try
+    {
+        pdf::PDFCMSManager unbudgetedManager(nullptr);
+        unbudgetedManager.setDocument(&document);
+    }
+    catch (const pdf::PDFBudgetExceededException&)
+    {
+        budgetFailurePropagated = true;
+    }
+    QVERIFY2(!budgetFailurePropagated, "only the overload that receives a budget accounts for the decode");
 }
 
 QTEST_GUILESS_MAIN(DocumentSessionTest)

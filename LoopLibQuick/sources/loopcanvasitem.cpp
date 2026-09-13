@@ -37,6 +37,8 @@
 #include <QScreen>
 #include <QWheelEvent>
 
+#include <utility>
+
 namespace pdfquick
 {
 
@@ -140,6 +142,10 @@ void LoopCanvasItem::bind(ViewportController* viewport, InteractionController* i
 
 void LoopCanvasItem::setTraceRecorder(pdfinteraction::InteractionTraceRecorder* recorder)
 {
+    if (recorder != m_ownedRecorder.get())
+    {
+        m_ownedRecorder.reset();
+    }
     m_recorder = recorder;
     m_present.setRecorder(recorder);
 
@@ -209,6 +215,21 @@ void LoopCanvasItem::setTraceOverlayVisible(bool visible)
     m_traceOverlayVisible = visible;
     Q_EMIT traceOverlayVisibleChanged();
     requestFrame();
+}
+
+pdfinteraction::InteractionTraceRecorder* LoopCanvasItem::ensureTraceRecorder()
+{
+    if (!m_recorder)
+    {
+        m_ownedRecorder = std::make_unique<pdfinteraction::InteractionTraceRecorder>(m_clock);
+        setTraceRecorder(m_ownedRecorder.get());
+    }
+    return m_recorder;
+}
+
+void LoopCanvasItem::setAsyncWorkKindsProvider(CanvasPresentMetrics::AsyncWorkKindsProvider provider)
+{
+    m_present.setAsyncWorkKindsProvider(std::move(provider));
 }
 
 void LoopCanvasItem::setHighContrast(bool highContrast)

@@ -97,6 +97,10 @@ private slots:
     void scrubber_windowsAbsolutePath();
     void scrubber_uncPath();
     void scrubber_posixAbsolutePath_dropsBasenameKeepsExtension();
+    void scrubber_sentryDsn();
+    void scrubber_authorizationHeader();
+    void scrubber_secretKeyValuePairs();
+    void scrubber_keepsNonSecretDiagnostics();
     void scrubber_idempotent();
     void scrubber_passthroughWhenNoMatches();
 
@@ -213,9 +217,75 @@ void DiagnosticsTest::scrubber_posixAbsolutePath_dropsBasenameKeepsExtension()
     QVERIFY(scrubbed.contains(QStringLiteral("<PATH:.pdf>")));
 }
 
+void DiagnosticsTest::scrubber_sentryDsn()
+{
+    const QString scrubbed = pdf::PDFLogScrubber::scrub(
+        QStringLiteral("Sentry init failed for https://0123456789abcdef@o42.ingest.sentry.io/1337"));
+
+    QVERIFY(!scrubbed.contains(QStringLiteral("0123456789abcdef")));
+    QVERIFY(scrubbed.contains(QStringLiteral("<CREDENTIAL>")));
+
+    const QString withPassword = pdf::PDFLogScrubber::scrub(
+        QStringLiteral("Connecting to https://svcuser:hunter2@ingest.example.com/api"));
+
+    QVERIFY(!withPassword.contains(QStringLiteral("hunter2")));
+    QVERIFY(!withPassword.contains(QStringLiteral("svcuser")));
+    QVERIFY(withPassword.contains(QStringLiteral("<CREDENTIAL>")));
+}
+
+void DiagnosticsTest::scrubber_authorizationHeader()
+{
+    const QString headerLine = pdf::PDFLogScrubber::scrub(
+        QStringLiteral("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature"));
+
+    QVERIFY(!headerLine.contains(QStringLiteral("eyJhbGciOiJIUzI1NiJ9")));
+    QVERIFY(headerLine.contains(QStringLiteral("<CREDENTIAL>")));
+    // The key survives: knowing *which* header was set is the diagnostic value.
+    QVERIFY(headerLine.contains(QStringLiteral("Authorization")));
+
+    const QString bareScheme = pdf::PDFLogScrubber::scrub(QStringLiteral("Retrying with Basic dXNlcjpwYXNzd29yZA=="));
+    QVERIFY(!bareScheme.contains(QStringLiteral("dXNlcjpwYXNzd29yZA==")));
+    QVERIFY(bareScheme.contains(QStringLiteral("<CREDENTIAL>")));
+
+    // An opaque all-alphabetic credential has no digit or punctuation to give it
+    // away: the scheme prefix is the only marker, and it must be enough.
+    const QString alphabetic = pdf::PDFLogScrubber::scrub(QStringLiteral("Retrying with Bearer abcdefghijklmnop"));
+    QVERIFY(!alphabetic.contains(QStringLiteral("abcdefghijklmnop")));
+    QVERIFY(alphabetic.contains(QStringLiteral("<CREDENTIAL>")));
+}
+
+void DiagnosticsTest::scrubber_secretKeyValuePairs()
+{
+    const QString json = pdf::PDFLogScrubber::scrub(QStringLiteral("{\"api_key\": \"sk-live-abcdef123456\"}"));
+    QVERIFY(!json.contains(QStringLiteral("sk-live-abcdef123456")));
+    QVERIFY(json.contains(QStringLiteral("<CREDENTIAL>")));
+    QVERIFY(json.contains(QStringLiteral("api_key")));
+
+    const QString assignment = pdf::PDFLogScrubber::scrub(QStringLiteral("token=abc123def456 retries=3"));
+    QVERIFY(!assignment.contains(QStringLiteral("abc123def456")));
+    QVERIFY(assignment.contains(QStringLiteral("<CREDENTIAL>")));
+    // Only the secret value is replaced - neighbouring diagnostics survive.
+    QVERIFY(assignment.contains(QStringLiteral("retries=3")));
+
+    const QString password = pdf::PDFLogScrubber::scrub(QStringLiteral("password => s3cr3t!"));
+    QVERIFY(!password.contains(QStringLiteral("s3cr3t")));
+    QVERIFY(password.contains(QStringLiteral("<CREDENTIAL>")));
+}
+
+void DiagnosticsTest::scrubber_keepsNonSecretDiagnostics()
+{
+    const QString text = QStringLiteral("Cannot read object. Unexpected token appeared. count=17");
+    QCOMPARE(pdf::PDFLogScrubber::scrub(text), text);
+
+    // A scheme word used as prose, with ordinary words after it, is not a header.
+    const QString prose = QStringLiteral("Basic rendering and error handling enabled");
+    QCOMPARE(pdf::PDFLogScrubber::scrub(prose), prose);
+}
+
 void DiagnosticsTest::scrubber_idempotent()
 {
-    const QString text = QStringLiteral("User jane.doe@example.com opened /srv/documents/Report.pdf from 203.0.113.42");
+    const QString text = QStringLiteral("User jane.doe@example.com opened /srv/documents/Report.pdf from 203.0.113.42 "
+                                        "with token=abc123def456 via https://key@ingest.example.com/9");
     const QString once = pdf::PDFLogScrubber::scrub(text);
     const QString twice = pdf::PDFLogScrubber::scrub(once);
     QCOMPARE(twice, once);

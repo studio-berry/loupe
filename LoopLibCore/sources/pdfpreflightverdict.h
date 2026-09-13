@@ -47,14 +47,28 @@ struct LOOPLIBCORESHARED_EXPORT PreflightVerdict
     QStringList waivedFindingIds;
 
     bool isPass() const { return state == PreflightVerdictState::Pass; }
+    bool allowsCertificateIssuance() const { return state == PreflightVerdictState::Pass; }
     QJsonObject toJson() const;
 };
+
+LOOPLIBCORESHARED_EXPORT PreflightVerdict preflightVerdictFromJson(const QJsonObject& object);
+
+/// PdfTool process exit codes for the four terminal states: 0 / 1 / 8 / 9.
+LOOPLIBCORESHARED_EXPORT int preflightVerdictProcessExitCode(PreflightVerdictState state);
+
+/// Operator-facing copy. Distinguishes a finished clean inspection from an unfinished one.
+LOOPLIBCORESHARED_EXPORT QString preflightVerdictOperatorSummary(const PreflightVerdict& verdict);
+
+/// PageMaster / batch gate message. Does not collapse Incomplete into a generic fail.
+LOOPLIBCORESHARED_EXPORT QString preflightGateFailureMessage(const QString& fileName,
+                                                             PreflightVerdictState state,
+                                                             bool revalidation = false);
 
 /// Reduces a normalized preflight result to the only operator-facing verdict.
 /// The result's legacy pass field is deliberately ignored.
 LOOPLIBCORESHARED_EXPORT PreflightVerdict reducePreflightVerdict(const PreflightResult& result,
-                                                                    const PreflightProfileData* effectiveProfile = nullptr);
+                                                                 const PreflightProfileData* effectiveProfile = nullptr);
 
-} // namespace pdf
+}   // namespace pdf
 
-#endif // PDFPREFLIGHTVERDICT_H
+#endif   // PDFPREFLIGHTVERDICT_H

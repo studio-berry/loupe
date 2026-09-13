@@ -28,6 +28,8 @@
 #include <QQuickWindow>
 #include <QScreen>
 
+#include <utility>
+
 namespace pdfquick
 {
 
@@ -71,6 +73,11 @@ void CanvasPresentMetrics::setMaxSamples(int maxSamples)
 void CanvasPresentMetrics::setRecorder(InteractionTraceRecorder* recorder)
 {
     m_recorder = recorder;
+}
+
+void CanvasPresentMetrics::setAsyncWorkKindsProvider(AsyncWorkKindsProvider provider)
+{
+    m_asyncWorkKindsProvider = std::move(provider);
 }
 
 void CanvasPresentMetrics::setClock(const IMonotonicClock* clock)
@@ -213,6 +220,10 @@ void CanvasPresentMetrics::onFramePresented(qint64 gpuNs, qint64 presentNs, qint
 
         if (m_recorder)
         {
+            if (m_asyncWorkKindsProvider)
+            {
+                m_recorder->recordAsyncWorkKinds(m_asyncWorkKindsProvider());
+            }
             m_recorder->endFrame();
         }
         return;
@@ -228,6 +239,10 @@ void CanvasPresentMetrics::onFramePresented(qint64 gpuNs, qint64 presentNs, qint
         // are. Charging it to Unknown instead would make the recorder's
         // slow-frame attribution answer "unknown" for every GPU-bound frame.
         m_recorder->recordStage(TraceStage::External, gpuNs + presentNs);
+        if (m_asyncWorkKindsProvider)
+        {
+            m_recorder->recordAsyncWorkKinds(m_asyncWorkKindsProvider());
+        }
         m_recorder->endFrame();
     }
 

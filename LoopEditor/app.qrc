@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file>app-icon.svg</file>
+        <file alias="profiles/loop-default.json">../loop-preflight/profiles/loop-default.json</file>
     </qresource>
 </RCC>

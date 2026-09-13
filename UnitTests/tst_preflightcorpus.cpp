@@ -28,12 +28,11 @@
 //    check's output is caught in CI instead of silently changing behavior
 //
 // PDFTOOL_EXECUTABLE_PATH and LOOP_PREFLIGHT_SOURCE_DIR are injected by
-// UnitTests/CMakeLists.txt. Fixture PDFs and snapshots are generated, not
-// hand-written (see loop-preflight/README.md); rows whose fixture hasn't been
-// generated yet are skipped rather than failed, so this test stays green until
-// its corpus is populated. Set LOOP_UPDATE_SNAPSHOTS=1 to (re)write the
-// snapshot files instead of comparing against them, e.g. after generating new
-// fixtures or an intentional rule change:
+// UnitTests/CMakeLists.txt. Fixture PDFs and snapshots are generated or
+// hand-written (see loop-preflight/README.md). Tracked corpus rows and pending
+// rows fail closed when they cannot be compared. Set LOOP_UPDATE_SNAPSHOTS=1 to
+// (re)write the snapshot files instead of comparing against them, e.g. after
+// generating new fixtures or an intentional rule change:
 //   LOOP_UPDATE_SNAPSHOTS=1 ctest -R UnitTestsPreflightCorpus
 
 #include "processoutputcapture.h"
@@ -264,14 +263,14 @@ void PreflightCorpusTest::preflightMatchesManifest()
 
     if (pending)
     {
-        QSKIP(s_pendingHint);
+        QFAIL(s_pendingHint);
     }
 
     QString pdfPath;
     QString profilePath;
     if (!resolveFixture(pdf, profile, pdfPath, profilePath))
     {
-        QSKIP(s_regenerateHint);
+        QFAIL(s_regenerateHint);
     }
 
     QJsonObject report;
@@ -309,14 +308,14 @@ void PreflightCorpusTest::preflightMatchesSnapshot()
 
     if (pending)
     {
-        QSKIP(s_pendingHint);
+        QFAIL(s_pendingHint);
     }
 
     QString pdfPath;
     QString profilePath;
     if (!resolveFixture(pdf, profile, pdfPath, profilePath))
     {
-        QSKIP(s_regenerateHint);
+        QFAIL(s_regenerateHint);
     }
 
     QJsonObject report;

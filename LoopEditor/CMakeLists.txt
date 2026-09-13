@@ -47,6 +47,10 @@ qt_add_qml_module(LoopEditor
         qml/CanvasPane.qml
         qml/PreflightPane.qml
         qml/InspectorPane.qml
+        qml/WorkspacePlaceholderPane.qml
+        qml/ShellToolBar.qml
+        qml/ShellMenuBar.qml
+        qml/MenuModel.qml
 )
 
 target_link_libraries(LoopEditor
@@ -76,6 +80,10 @@ add_dependencies(LoopEditor LoopLibQuickplugin)
 set(_loop_editor_win32_executable ON)
 if(WIN32 AND LOOP_LOOP_DISTRIBUTION)
     set(_loop_editor_win32_executable OFF)
+endif()
+
+if(LOOP_LOOP_DISTRIBUTION)
+    target_compile_definitions(LoopEditor PRIVATE LOOP_LOOP_DISTRIBUTION_BUILD=1)
 endif()
 
 set_target_properties(LoopEditor PROPERTIES

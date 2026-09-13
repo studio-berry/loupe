@@ -1415,9 +1415,7 @@ PDFPageMasterExportResult PDFPageMasterExport::run(PDFPageMasterExportJob job)
 
             if (verdict.state != PreflightVerdictState::Pass && !job.forcePreflight)
             {
-                const QString message = QCoreApplication::translate("pdf::PDFPageMasterExport",
-                                                                    "Preflight failed for '%1'.")
-                                            .arg(fileName);
+                const QString message = preflightGateFailureMessage(fileName, verdict.state, false);
                 setOutputStatus(manifest, int(index), OUTPUT_STATUS_FAILED, message);
                 persistManifestForJob(manifestPath, manifest);
                 finishProgressIfActive(activeProgress(job));
@@ -1677,9 +1675,7 @@ PDFPageMasterExportResult PDFPageMasterExport::run(PDFPageMasterExportJob job)
 
             if (verdict.state != PreflightVerdictState::Pass && !job.forcePreflight)
             {
-                const QString message = QCoreApplication::translate("pdf::PDFPageMasterExport",
-                                                                    "Final preflight revalidation failed for '%1'.")
-                                            .arg(fileName);
+                const QString message = preflightGateFailureMessage(fileName, verdict.state, true);
                 setOutputStatus(manifest, int(index), OUTPUT_STATUS_FAILED, message);
                 persistManifestForJob(manifestPath, manifest);
                 finishProgressIfActive(activeProgress(job));

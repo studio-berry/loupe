@@ -27,6 +27,7 @@
 
 #include "pdfbleedmarginprobe.h"
 #include "pdfblendfunction.h"
+#include "pdfblockingthreadguard.h"
 #include "pdfcatalog.h"
 #include "pdfcms.h"
 #include "pdfcolorinventory.h"
@@ -5701,6 +5702,21 @@ PreflightResult PreflightEngine::run(const PreflightProfileData& profile, const 
     if (m_session)
     {
         m_session->resetProcessingBudget();
+    }
+
+    if (!PDFBlockingThreadGuard::assertOffInteractiveThread("PreflightEngine::run"))
+    {
+        result.inspectionComplete = false;
+        result.errorCode = QStringLiteral("interactive-thread-violation");
+        result.errorMessage = PDFTranslationContext::tr("Preflight cannot run synchronously on the interactive thread.");
+        PreflightFinding finding;
+        finding.scope = QString::fromLatin1(PREFLIGHT_FINDING_SCOPE_DOCUMENT);
+        finding.type = QStringLiteral("interactive-thread-violation");
+        finding.severity = QStringLiteral("error");
+        finding.message = result.errorMessage;
+        result.errors.push_back(finding);
+        result.pass = reducePreflightVerdict(result, &profile).isPass();
+        return result;
     }
 
     if (profile.restrictions.hasUnsupportedScope())

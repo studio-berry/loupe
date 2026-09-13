@@ -80,6 +80,10 @@ PDFToolExitCode PDFToolFetchTextApplication::execute(const PDFToolOptions& optio
     formatter.beginDocument("text-extraction", QString());
     formatter.endl();
 
+    // Counts the page text actually emitted, so --fail-if-empty tracks what the
+    // caller receives rather than what the flow happened to contain.
+    qsizetype extractedCharacters = 0;
+
     for (const pdf::PDFDocumentTextFlow::Item& item : documentTextFlow.getItems())
     {
         if (item.flags.testFlag(pdf::PDFDocumentTextFlow::StructureItemStart))
@@ -102,6 +106,13 @@ PDFToolExitCode PDFToolFetchTextApplication::execute(const PDFToolOptions& optio
             if (showText)
             {
                 formatter.writeText("text", item.text);
+
+                // Only page content counts: page-number and structure markers are
+                // emitted even for a document that contains no text at all.
+                if (item.flags.testFlag(pdf::PDFDocumentTextFlow::Text))
+                {
+                    extractedCharacters += item.text.size();
+                }
             }
         }
 
@@ -135,12 +146,20 @@ PDFToolExitCode PDFToolFetchTextApplication::execute(const PDFToolOptions& optio
         PDFConsole::writeText(formatter.getString(), options.outputCodec);
     }
 
+    // A document whose selected pages carry no text at all is a legitimate
+    // answer, but a pipeline that expects text needs to be able to tell that
+    // case apart from "extraction ran and produced nothing".
+    if (extractedCharacters == 0)
+    {
+        return reportEmptyResult(options, PDFToolTranslationContext::tr("text"));
+    }
+
     return PDFToolExitCode::Success;
 }
 
 PDFToolAbstractApplication::Options PDFToolFetchTextApplication::getOptionsFlags() const
 {
-    return ConsoleFormat | OpenDocument | PageSelector | TextAnalysis | TextShow;
+    return ConsoleFormat | OpenDocument | PageSelector | TextAnalysis | TextShow | EmptyResultPolicy;
 }
 
 }   // namespace pdftool

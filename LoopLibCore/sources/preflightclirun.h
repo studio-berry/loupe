@@ -36,6 +36,7 @@ namespace pdf
 {
 
 class PDFOperationControl;
+struct PreflightResolvedProfile;
 
 struct LOOPLIBCORESHARED_EXPORT PreflightFileInspectionRequest
 {
@@ -64,6 +65,13 @@ struct LOOPLIBCORESHARED_EXPORT PreflightFileInspectionOutcome
 /// executables never own parsed PDF state across the MSVC DLL boundary.
 LOOPLIBCORESHARED_EXPORT PreflightFileInspectionOutcome inspectPreflightFile(
     const PreflightFileInspectionRequest& request);
+
+/// Adds the provenance fields which make a preflight result a normalized report.
+/// Hosts must use this instead of assembling report identity independently; the
+/// CLI and the interactive shell consequently export the identical JSON shape.
+LOOPLIBCORESHARED_EXPORT void finalizePreflightResult(PreflightResult& result,
+                                                      const QByteArray& documentRevisionHash,
+                                                      const PreflightResolvedProfile& profile);
 
 }   // namespace pdf
 

@@ -22,6 +22,7 @@
 
 #include "preflightengine.h"
 #include "preflightprofileresolver.h"
+#include "pdfblockingthreadguard.h"
 #include "pdfpreflightverdict.h"
 #include "pdfcolorinventory.h"
 #include "pdfdocumentbuilder.h"
@@ -87,6 +88,7 @@ private slots:
     void run_advertisesOnlyApplicableRegisteredFixups();
     void fixupCapabilities_matchRepairRegistry();
     void run_invalidProfileEmitsDocumentScopeFinding();
+    void run_rejectsInteractiveThreadInvocationWhenRegistered();
     void findingStableId_ignoresMessageAndBbox();
     void decisionRejectsMissingJustification();
     void decisionRoundTripAndStalenessAreDeterministic();
@@ -1302,6 +1304,26 @@ void PreflightEngineTest::run_invalidProfileEmitsDocumentScopeFinding()
     QCOMPARE(finding.value(QStringLiteral("scope")).toString(), QStringLiteral("document"));
     QVERIFY(!finding.contains(QStringLiteral("page")));
     QVERIFY(!finding.contains(QStringLiteral("bbox")));
+}
+
+void PreflightEngineTest::run_rejectsInteractiveThreadInvocationWhenRegistered()
+{
+    struct ScopedInteractiveThread final
+    {
+        ScopedInteractiveThread() { pdf::PDFBlockingThreadGuard::registerInteractiveThread(); }
+        ~ScopedInteractiveThread() { pdf::PDFBlockingThreadGuard::clearInteractiveThread(); }
+    } scopedInteractiveThread;
+
+    pdf::PreflightEngine engine(nullptr);
+    const pdf::PreflightResult result = engine.run(pdf::PreflightProfileData());
+
+    // issue #144 AC5/AC1: PreflightEngine::run is the blocking implementation
+    // wrapped by the interactive preflight job; it must refuse to run on the
+    // thread this test just registered as interactive rather than silently
+    // stalling pointer/frame handling.
+    QCOMPARE(result.errorCode, QStringLiteral("interactive-thread-violation"));
+    QVERIFY(!result.inspectionComplete);
+    QVERIFY(!result.pass);
 }
 
 void PreflightEngineTest::findingStableId_ignoresMessageAndBbox()

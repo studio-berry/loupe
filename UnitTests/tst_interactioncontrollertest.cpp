@@ -218,6 +218,7 @@ private Q_SLOTS:
     void tracePercentilesUseNearestRank();
     void traceReportsBudgetUnavailable();
     void traceAttributesSlowFrames();
+    void traceRecordsAsyncOverlapWithoutPayload();
     void traceRoundTripsThroughJson();
     void traceReplayReproducesState();
     void traceCarriesNoDocumentPayload();
@@ -921,6 +922,27 @@ void InteractionControllerTest::traceAttributesSlowFrames()
     QCOMPARE(causes.value(QStringLiteral("overlay")).toInt(), 0);
 
     QCOMPARE(recorder.summary().value(QStringLiteral("counts")).toObject().value(QStringLiteral("frames")).toInt(), 3);
+}
+
+void InteractionControllerTest::traceRecordsAsyncOverlapWithoutPayload()
+{
+    pdfinteraction::ManualClock clock;
+    pdfinteraction::InteractionTraceRecorder::Config config;
+    config.refreshRateHz = 60.0;
+    pdfinteraction::InteractionTraceRecorder recorder(clock, config);
+
+    recorder.beginFrame();
+    recorder.recordAsyncWorkKinds({ QStringLiteral("preflight") });
+    clock.advanceMs(20.0);
+    recorder.endFrame();
+
+    const QJsonObject asyncWork = recorder.summary().value(QStringLiteral("async_work")).toObject();
+    QCOMPARE(asyncWork.value(QStringLiteral("frames_with_async_work")).toInt(), 1);
+    QCOMPARE(asyncWork.value(QStringLiteral("slow_frames_with_async_work")).toInt(), 1);
+    QCOMPARE(asyncWork.value(QStringLiteral("slow_frame_kinds")).toObject().value(QStringLiteral("preflight")).toInt(), 1);
+    const QString compact = QString::fromUtf8(QJsonDocument(recorder.summary()).toJson(QJsonDocument::Compact));
+    QVERIFY(!compact.contains(QStringLiteral("doc-1")));
+    QVERIFY(!compact.contains(QStringLiteral("finding-1")));
 }
 
 void InteractionControllerTest::traceRoundTripsThroughJson()

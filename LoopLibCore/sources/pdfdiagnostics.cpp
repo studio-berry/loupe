@@ -138,18 +138,35 @@ QJsonObject buildSystemInfo(const QString& applicationId)
     return root;
 }
 
+/// Longest plugin display string copied into a bundle. Plugin metadata is
+/// author-supplied JSON that Loop does not size-validate at load time, so an
+/// installed plugin with a multi-megabyte Description would otherwise bloat
+/// every future support bundle. The cap is generous for a real display string
+/// and the truncation is visible rather than silent.
+constexpr int PLUGIN_FIELD_LENGTH_LIMIT = 2048;
+
+QString truncatePluginField(const QString& value)
+{
+    if (value.size() <= PLUGIN_FIELD_LENGTH_LIMIT)
+    {
+        return value;
+    }
+
+    return value.left(PLUGIN_FIELD_LENGTH_LIMIT) + QStringLiteral("... <truncated>");
+}
+
 QJsonObject buildPlugins(const PDFPluginInfos& plugins)
 {
     QJsonArray array;
     for (const PDFPluginInfo& plugin : plugins)
     {
         QJsonObject entry;
-        entry[QStringLiteral("name")] = plugin.name;
-        entry[QStringLiteral("pluginId")] = plugin.pluginId;
+        entry[QStringLiteral("name")] = truncatePluginField(plugin.name);
+        entry[QStringLiteral("pluginId")] = truncatePluginField(plugin.pluginId);
         entry[QStringLiteral("abiVersion")] = static_cast<int>(plugin.abiVersion);
-        entry[QStringLiteral("author")] = plugin.author;
-        entry[QStringLiteral("version")] = plugin.version;
-        entry[QStringLiteral("license")] = plugin.license;
+        entry[QStringLiteral("author")] = truncatePluginField(plugin.author);
+        entry[QStringLiteral("version")] = truncatePluginField(plugin.version);
+        entry[QStringLiteral("license")] = truncatePluginField(plugin.license);
         array.append(entry);
     }
 

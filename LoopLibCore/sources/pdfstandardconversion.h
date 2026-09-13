@@ -25,6 +25,7 @@
 
 #include "pdfdocument.h"
 #include "pdfglobal.h"
+#include "pdftransparencyflattener.h"
 #include "pdfutils.h"   // PDFOperationResult, returned by preview()/apply() below
 
 #include <QByteArray>
@@ -43,9 +44,20 @@ enum class PDFStandardTarget
     PDFA2b
 };
 
+/// Whether a conversion flattens live transparency. `Automatic` follows the
+/// target's own rule (PDF/X-1a:2001 and PDF/X-3:2002 forbid live transparency,
+/// PDF/X-4 and PDF/A-2b permit it); the other two values are an operator's
+/// explicit instruction and are honoured even when they contradict that rule.
+enum class PDFTransparencyFlattenPolicy
+{
+    Automatic,
+    Always,
+    Never
+};
+
 LOOPLIBCORESHARED_EXPORT QString pdfStandardTargetToString(PDFStandardTarget target);
 LOOPLIBCORESHARED_EXPORT bool pdfStandardTargetFromString(const QString& value,
-                                                            PDFStandardTarget* target);
+                                                          PDFStandardTarget* target);
 LOOPLIBCORESHARED_EXPORT QStringList supportedPDFStandardTargets();
 
 struct LOOPLIBCORESHARED_EXPORT PDFStandardConversionSettings
@@ -56,11 +68,19 @@ struct LOOPLIBCORESHARED_EXPORT PDFStandardConversionSettings
     QString outputIntentName;
     bool normalizeColor = false;
     bool blackPointCompensation = true;
+    PDFTransparencyFlattenPolicy transparencyFlatten = PDFTransparencyFlattenPolicy::Automatic;
+    PDFTransparencyFlattenSettings transparencyFlattenSettings;
     QString independentValidatorProgram;
     QStringList independentValidatorArguments;
     int independentValidatorTimeoutMs = 120000;
     bool dryRunOnly = false;
 };
+
+/// True when \p settings ask for live transparency to be flattened, following
+/// the target default only when the policy is Automatic. Preview, the
+/// preflight-blocker classification, the operation plan's expected changes, and
+/// the apply path must all use this one answer.
+LOOPLIBCORESHARED_EXPORT bool flattensTransparency(const PDFStandardConversionSettings& settings);
 
 struct LOOPLIBCORESHARED_EXPORT PDFStandardConversionChange
 {
@@ -83,6 +103,7 @@ struct LOOPLIBCORESHARED_EXPORT PDFStandardConversionReport
     QStringList blockers;
     QStringList warnings;
     QJsonObject validator;
+    QJsonObject transparencyFlatten;
 
     QJsonObject toJson() const;
 };

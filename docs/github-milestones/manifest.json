@@ -33,6 +33,12 @@
       "state": "open"
     },
     {
+      "title": "0.2.1",
+      "github_number": 17,
+      "description_file": "0.2.1.md",
+      "state": "open"
+    },
+    {
       "title": "0.3.0",
       "github_number": 9,
       "description_file": "0.3.0.md",

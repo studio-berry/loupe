@@ -24,7 +24,7 @@ The accepted critical path through 0.4.0 is:
 
 **release correctness → semantic truth → operator interaction → governed correction → bounded automation**
 
-with the release train **0.1.0 → 0.1.1 → 0.2.0 → 0.3.0 → 0.4.0**. This extension continues
+with the release train **0.1.0 → 0.1.1 → 0.2.0 → 0.2.1 → 0.3.0 → 0.4.0**. This extension continues
 the same dependency-first logic — each milestone consumes guarantees from the left and may
 not recreate or weaken them:
 

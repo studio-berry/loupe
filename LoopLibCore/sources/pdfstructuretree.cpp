@@ -35,6 +35,11 @@
 namespace pdf
 {
 
+/// Deepest structure-tree nesting this parser will follow. Structure trees model
+/// document semantics (sections, paragraphs, table cells); real ones are tens of
+/// levels deep, not thousands, and the parser is recursive.
+static constexpr size_t MAXIMUM_STRUCTURE_TREE_DEPTH = 512;
+
 /// Attribute definition structure
 struct PDFStructureTreeAttributeDefinition
 {
@@ -46,7 +51,6 @@ struct PDFStructureTreeAttributeDefinition
         name(name),
         inheritable(inheritable)
     {
-
     }
 
     /// Returns attribute definition for given attribute name. This function
@@ -76,8 +80,7 @@ struct PDFStructureTreeAttributeDefinition
 };
 
 
-static constexpr std::array<std::pair<const char*, const PDFStructureTreeAttribute::Owner>, 16> s_ownerDefinitions =
-{
+static constexpr std::array<std::pair<const char*, const PDFStructureTreeAttribute::Owner>, 16> s_ownerDefinitions = {
     std::pair<const char*, const PDFStructureTreeAttribute::Owner>("Layout", PDFStructureTreeAttribute::Owner::Layout),
     std::pair<const char*, const PDFStructureTreeAttribute::Owner>("List", PDFStructureTreeAttribute::Owner::List),
     std::pair<const char*, const PDFStructureTreeAttribute::Owner>("PrintField", PDFStructureTreeAttribute::Owner::PrintField),
@@ -96,9 +99,8 @@ static constexpr std::array<std::pair<const char*, const PDFStructureTreeAttribu
     std::pair<const char*, const PDFStructureTreeAttribute::Owner>("ARIA-1.1", PDFStructureTreeAttribute::Owner::ARIA_1_1)
 };
 
-static constexpr std::array<const PDFStructureTreeAttributeDefinition, PDFStructureTreeAttribute::Attribute::LastAttribute + 1> s_attributeDefinitions =
-{
-    PDFStructureTreeAttributeDefinition(PDFStructureTreeAttribute::Attribute::User, "", false), // User
+static constexpr std::array<const PDFStructureTreeAttributeDefinition, PDFStructureTreeAttribute::Attribute::LastAttribute + 1> s_attributeDefinitions = {
+    PDFStructureTreeAttributeDefinition(PDFStructureTreeAttribute::Attribute::User, "", false),   // User
 
     // Standard layout attributes
     PDFStructureTreeAttributeDefinition(PDFStructureTreeAttribute::Attribute::Placement, "Placement", false),
@@ -282,7 +284,6 @@ PDFStructureTreeAttribute::PDFStructureTreeAttribute() :
     m_namespace(),
     m_value()
 {
-
 }
 
 PDFStructureTreeAttribute::PDFStructureTreeAttribute(const PDFStructureTreeAttributeDefinition* definition,
@@ -296,7 +297,6 @@ PDFStructureTreeAttribute::PDFStructureTreeAttribute(const PDFStructureTreeAttri
     m_namespace(namespaceReference),
     m_value(qMove(value))
 {
-
 }
 
 PDFStructureTreeAttribute::Attribute PDFStructureTreeAttribute::getType() const
@@ -507,7 +507,8 @@ std::vector<PDFObjectReference> PDFStructureTree::getParents(PDFInteger id) cons
     Q_ASSERT(std::is_sorted(m_parentTreeEntries.cbegin(), m_parentTreeEntries.cend()));
     auto iterators = std::equal_range(m_parentTreeEntries.cbegin(), m_parentTreeEntries.cend(), entry);
     result.reserve(std::distance(iterators.first, iterators.second));
-    std::transform(iterators.first, iterators.second, std::back_inserter(result), [](const auto& item) { return item.reference; });
+    std::transform(iterators.first, iterators.second, std::back_inserter(result), [](const auto& item)
+                   { return item.reference; });
     return result;
 }
 
@@ -560,7 +561,8 @@ PDFStructureTree PDFStructureTree::parse(const PDFObjectStorage* storage, PDFObj
 
         if (dictionary->hasKey("IDTree"))
         {
-            tree.m_idTreeMap = PDFNameTreeLoader<PDFObjectReference>::parse(storage, dictionary->get("IDTree"), [](const PDFObjectStorage*, const PDFObject& object) { return object.isReference() ? object.getReference() : PDFObjectReference(); });
+            tree.m_idTreeMap = PDFNameTreeLoader<PDFObjectReference>::parse(storage, dictionary->get("IDTree"), [](const PDFObjectStorage*, const PDFObject& object)
+                                                                            { return object.isReference() ? object.getReference() : PDFObjectReference(); });
         }
 
         if (dictionary->hasKey("ParentTree"))
@@ -597,7 +599,7 @@ PDFStructureTree PDFStructureTree::parse(const PDFObjectStorage* storage, PDFObj
                         return ParentTreeParseEntry{ id, { object.getReference() } };
                     }
 
-                    return ParentTreeParseEntry{ id, { } };
+                    return ParentTreeParseEntry{ id, {} };
                 }
             };
             auto entries = PDFNumberTreeLoader<ParentTreeParseEntry>::parse(storage, dictionary->get("ParentTree"));
@@ -605,7 +607,7 @@ PDFStructureTree PDFStructureTree::parse(const PDFObjectStorage* storage, PDFObj
             {
                 for (const PDFObjectReference& reference : entry.references)
                 {
-                    tree.m_parentTreeEntries.emplace_back(ParentTreeEntry{entry.id, reference});
+                    tree.m_parentTreeEntries.emplace_back(ParentTreeEntry{ entry.id, reference });
                 }
             }
             std::stable_sort(tree.m_parentTreeEntries.begin(), tree.m_parentTreeEntries.end());
@@ -662,6 +664,15 @@ PDFStructureTree::ParentTreeEntry PDFStructureTree::getParentTreeEntry(PDFIntege
 
 PDFStructureItemPointer PDFStructureItem::parse(const PDFObjectStorage* storage, PDFObject object, PDFMarkedObjectsContext* context, PDFStructureItem* parent)
 {
+    // A cyclic structure tree is already refused by the marked-objects context,
+    // but an acyclic chain of tens of thousands of distinct StructElem nodes is
+    // not a cycle - it is just deep, and this parser is recursive. The marked
+    // set holds exactly the current path, so its size is that path's depth.
+    if (context && context->getMarkedCount() >= MAXIMUM_STRUCTURE_TREE_DEPTH)
+    {
+        return nullptr;
+    }
+
     if (const PDFDictionary* dictionary = storage->getDictionaryFromObject(object))
     {
         PDFDocumentDataLoaderDecorator loader(storage);

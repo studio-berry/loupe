@@ -22,6 +22,7 @@
 
 #include "preflightfindingsmodel.h"
 
+#include <QSet>
 #include <QVariant>
 
 namespace pdfinteraction
@@ -101,6 +102,8 @@ QVariant PreflightFindingsModel::data(const QModelIndex& index, int role) const
             return finding.evidenceIds;
         case SelectedRole:
             return finding.selected;
+        case WaivedRole:
+            return finding.waived;
     }
     return {};
 }
@@ -120,18 +123,20 @@ QHash<int, QByteArray> PreflightFindingsModel::roleNames() const
         { CheckIdRole, "checkId" },
         { BoundingBoxRole, "boundingBox" },
         { EvidenceIdsRole, "evidenceIds" },
-        { SelectedRole, "selected" }
+        { SelectedRole, "selected" },
+        { WaivedRole, "waived" }
     };
 }
 
 PreflightFindingView PreflightFindingsModel::makeView(const QString& documentKey,
                                                       const QString& documentRevision,
-                                                      const pdf::PreflightFinding& finding)
+                                                      const pdf::PreflightFinding& finding,
+                                                      bool waived)
 {
     return {
         finding.stableId(), documentKey, documentRevision, finding.scope, finding.page,
         finding.objectId, finding.severity, finding.type, finding.message, finding.checkId,
-        finding.bbox, finding.evidenceIds, false
+        finding.bbox, finding.evidenceIds, false, waived
     };
 }
 
@@ -140,15 +145,26 @@ void PreflightFindingsModel::replace(QString documentKey,
                                      const QList<pdf::PreflightFinding>& errors,
                                      const QList<pdf::PreflightFinding>& warnings)
 {
+    replace(std::move(documentKey), std::move(documentRevision), errors, warnings, {});
+}
+
+void PreflightFindingsModel::replace(QString documentKey,
+                                     QString documentRevision,
+                                     const QList<pdf::PreflightFinding>& errors,
+                                     const QList<pdf::PreflightFinding>& warnings,
+                                     const QStringList& waivedFindingIds)
+{
+    const QSet<QString> waived(waivedFindingIds.cbegin(), waivedFindingIds.cend());
+
     QVector<PreflightFindingView> next;
     next.reserve(errors.size() + warnings.size());
     for (const pdf::PreflightFinding& finding : errors)
     {
-        next.push_back(makeView(documentKey, documentRevision, finding));
+        next.push_back(makeView(documentKey, documentRevision, finding, waived.contains(finding.stableId())));
     }
     for (const pdf::PreflightFinding& finding : warnings)
     {
-        next.push_back(makeView(documentKey, documentRevision, finding));
+        next.push_back(makeView(documentKey, documentRevision, finding, waived.contains(finding.stableId())));
     }
 
     beginResetModel();
@@ -302,7 +318,13 @@ QHash<QString, OverlaySeverity> PreflightFindingsModel::severityMap() const
     QHash<QString, OverlaySeverity> severities;
     for (const PreflightFindingView& finding : m_findings)
     {
-        severities.insert(finding.id, severityFromString(finding.severity));
+        // An actively waived finding is a recorded disposition, not a blocker:
+        // painting it as an error would contradict the PASS verdict the same
+        // controller just announced. The overlay vocabulary has no Waived
+        // severity of its own (adding one ripples through CanvasPalette and the
+        // Quick token set), so the non-blocking treatment is what it maps to.
+        severities.insert(finding.id,
+                          finding.waived ? OverlaySeverity::Info : severityFromString(finding.severity));
     }
     return severities;
 }

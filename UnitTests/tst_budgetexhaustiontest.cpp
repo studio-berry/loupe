@@ -29,6 +29,7 @@
 #include "pdfthinpartprobe.h"
 #include "preflightengine.h"
 
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -58,6 +59,8 @@ private slots:
     void generatedPdfCorpusHasProductionReaderInputs();
     void preflightEvidenceBudgetIsIncomplete();
     void rasterSizeBudgetIsIncomplete();
+    void permissiveRecoveryRefusesSparseObjectNumbering();
+    void permissiveRecoveryCarriesASourceDigest();
 };
 
 namespace
@@ -557,6 +560,53 @@ void BudgetExhaustionTest::generatedPdfCorpusHasProductionReaderInputs()
     reader.readFromBuffer(QByteArrayLiteral("%PDF-1.7\nnot a PDF\n%%EOF\n"));
     QCOMPARE(reader.getReadingResult(), pdf::PDFDocumentReader::Result::Failed);
     QVERIFY(!reader.getErrorMessage().contains(QStringLiteral("budget"), Qt::CaseInsensitive));
+}
+
+namespace
+{
+
+// A damaged document: no xref, no trailer offset, so the reader falls back to
+// permissive recovery and rebuilds the object table from the object headers it
+// can find.
+QByteArray damagedDocument(const QByteArray& firstObjectNumber)
+{
+    QByteArray data = QByteArrayLiteral("%PDF-1.7\n");
+    data += firstObjectNumber + QByteArrayLiteral(" 0 obj\n<< /Type /Catalog >>\nendobj\n");
+    data += QByteArrayLiteral("trailer\n<< /Root ") + firstObjectNumber + QByteArrayLiteral(" 0 R >>\n%%EOF\n");
+    return data;
+}
+
+}   // namespace
+
+void BudgetExhaustionTest::permissiveRecoveryRefusesSparseObjectNumbering()
+{
+    // One recovered object numbered 9999999 would otherwise resize the dense
+    // object table to ten million entries - an allocation the document asks for
+    // simply by naming a large object number.
+    pdf::PDFDocumentReader reader(nullptr, [](bool*)
+                                  { return QString(); }, true, false);
+    reader.readFromBuffer(damagedDocument(QByteArrayLiteral("9999999")));
+
+    QCOMPARE(reader.getReadingResult(), pdf::PDFDocumentReader::Result::Failed);
+}
+
+void BudgetExhaustionTest::permissiveRecoveryCarriesASourceDigest()
+{
+    // A permissively recovered document must still carry the digest of the bytes
+    // it came from: PDFDocumentWriter::writeIncremental refuses to append when
+    // the source changed, and an empty digest silently disables that guard.
+    const QByteArray bytes = damagedDocument(QByteArrayLiteral("1"));
+
+    pdf::PDFDocumentReader reader(nullptr, [](bool*)
+                                  { return QString(); }, true, false);
+    const pdf::PDFDocument document = reader.readFromBuffer(bytes);
+
+    if (reader.getReadingResult() != pdf::PDFDocumentReader::Result::OK)
+    {
+        QSKIP("Permissive recovery did not accept the synthetic damaged document.");
+    }
+
+    QCOMPARE(document.getSourceDataHash(), QCryptographicHash::hash(bytes, QCryptographicHash::Sha256));
 }
 
 void BudgetExhaustionTest::generatedCorpusIsIncompleteNeverPass()

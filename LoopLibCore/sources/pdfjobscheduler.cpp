@@ -585,6 +585,52 @@ void PDFJobScheduler::finishJob(const std::shared_ptr<JobEntry>& job,
             job->cancellationLatencyMs = job->cancellationRequestedAtUtc.msecsTo(job->finishedAtUtc);
         }
         appendTrace(job, status, job->durationMs);
+
+        // Release the closure now: it is the only thing holding whatever the work
+        // captured, and the job is finished. The JobEntry itself is cheap (strings
+        // and timestamps) and stays for snapshot()/trace() lookups.
+        job->work = nullptr;
+
+        // Bound the retained terminal history, evicting oldest-first. The age
+        // order is derived from JobEntry::sequence (assigned under this lock at
+        // submission) rather than from a separate queue member: PDFJobScheduler is
+        // an exported class, and growing it would corrupt every dependent that is
+        // already built (DocumentViewSession allocates it with make_unique on the
+        // Editor side) until that binary is recompiled. The scan runs only while
+        // more than MAXIMUM_RETAINED_TERMINAL_JOBS jobs are tracked at all.
+        if (m_jobs.size() > MAXIMUM_RETAINED_TERMINAL_JOBS)
+        {
+            auto evictionCandidate = m_jobs.end();
+            int terminalJobCount = 0;
+            for (auto it = m_jobs.begin(); it != m_jobs.end(); ++it)
+            {
+                if (!isTerminal(it->second->status))
+                {
+                    continue;
+                }
+
+                ++terminalJobCount;
+
+                if (it->first == job->spec.jobId)
+                {
+                    // The job that just finished is the one whose snapshot is being
+                    // reported below; it becomes evictable when a later job finishes.
+                    continue;
+                }
+
+                if (evictionCandidate == m_jobs.end() || it->second->sequence < evictionCandidate->second->sequence)
+                {
+                    evictionCandidate = it;
+                }
+            }
+
+            if (terminalJobCount > MAXIMUM_RETAINED_TERMINAL_JOBS && evictionCandidate != m_jobs.end())
+            {
+                m_traces.erase(evictionCandidate->first);
+                m_jobs.erase(evictionCandidate);
+            }
+        }
+
         finishedSnapshot = snapshotLocked(*job);
     }
     m_finishedCondition.notify_all();
@@ -598,6 +644,7 @@ void PDFJobScheduler::appendTrace(const std::shared_ptr<JobEntry>& job,
 {
     PDFJobTraceEvent event;
     event.jobId = job->spec.jobId;
+    event.kind = job->spec.kind;
     event.status = status;
     event.priority = job->spec.priority;
     event.queueDepth = job->queueDepth;
@@ -605,7 +652,12 @@ void PDFJobScheduler::appendTrace(const std::shared_ptr<JobEntry>& job,
     event.elapsedMs = elapsedMs;
     event.cancellationLatencyMs = job->cancellationLatencyMs;
     event.timestampUtc = QDateTime::currentDateTimeUtc();
-    m_traces[job->spec.jobId].append(event);
+    QList<PDFJobTraceEvent>& events = m_traces[job->spec.jobId];
+    events.append(event);
+    while (events.size() > MAXIMUM_RETAINED_TRACE_EVENTS_PER_JOB)
+    {
+        events.removeFirst();
+    }
 }
 
 bool PDFJobScheduler::isStale(const PDFJobSpec& spec) const

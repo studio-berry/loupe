@@ -39,6 +39,7 @@
 #include <QImageWriter>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QFile>
 #include <QTemporaryDir>
 
 namespace pdftool
@@ -199,25 +200,29 @@ bool renderPageToPng(pdf::PDFDocument* document,
             renderError = writer.errorString();
             return;
         }
+
+        // The staging directory is already private (QTemporaryDir uses mkdtemp,
+        // i.e. 0700), but the raster carries the document's content, so make the
+        // file itself owner-only too rather than relying on the directory mode
+        // alone. A failure here is not fatal - the enclosing directory still
+        // keeps other local users out.
+        QFile::setPermissions(outputPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+
         rendered = true;
     };
 
-    rasterizerPool.render(pageIndices,
-                          [&](const pdf::PDFPage* renderPage) -> QSize
+    rasterizerPool.render(pageIndices, [&](const pdf::PDFPage* renderPage) -> QSize
                           {
                               Q_UNUSED(renderPage);
-                              return imageSize;
-                          },
-                          onRendered,
-                          nullptr);
+                              return imageSize; }, onRendered, nullptr);
 
     fontCache.setCacheShrinkEnabled(nullptr, true);
 
     if (!rendered)
     {
         errorMessage = renderError.isEmpty()
-            ? PDFToolTranslationContext::tr("Failed to render page %1.").arg(pageIndex + 1)
-            : renderError;
+                           ? PDFToolTranslationContext::tr("Failed to render page %1.").arg(pageIndex + 1)
+                           : renderError;
         return false;
     }
 
@@ -515,8 +520,7 @@ PDFToolExitCode PDFToolOcrApplication::execute(const PDFToolOptions& options)
     if (options.executionContext)
     {
         options.executionContext->setData(QJsonObject{
-            { QStringLiteral("report"), report.toJson() }
-        });
+            { QStringLiteral("report"), report.toJson() } });
     }
 
     if (cancelled)

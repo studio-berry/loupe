@@ -314,24 +314,6 @@ bool exportDecisions(const QString& decisionsPath,
     return true;
 }
 
-bool hasActiveSignoffForFinding(const pdf::PreflightFinding& finding,
-                                const QList<pdf::PreflightDecision>& decisions,
-                                const QString& documentDigest,
-                                const QString& profileDigest)
-{
-    const pdf::PreflightDecision* latest = nullptr;
-    for (const pdf::PreflightDecision& decision : decisions)
-    {
-        if (decision.findingId != finding.stableId() || (latest && decision.timestampUtc < latest->timestampUtc))
-        {
-            continue;
-        }
-        latest = &decision;
-    }
-
-    return latest && latest->countsForSignoff(documentDigest, profileDigest);
-}
-
 static PDFToolPreflightApplication s_preflightApplication;
 
 }   // namespace
@@ -449,7 +431,7 @@ PDFToolExitCode PDFToolPreflightApplication::execute(const PDFToolOptions& optio
                 options.executionContext->setData(QJsonObject{
                     { QStringLiteral("report"), result.toJson(options.document) } });
             }
-            return PDFToolExitCode::PreflightIncomplete;
+            return static_cast<PDFToolExitCode>(pdf::preflightVerdictProcessExitCode(pdf::reducePreflightVerdict(result).state));
         }
         resolved = resolver.resolveExplicitProfile(bound.profile,
                                                    QFileInfo(options.preflightProfilePath).completeBaseName(),
@@ -530,9 +512,7 @@ PDFToolExitCode PDFToolPreflightApplication::execute(const PDFToolOptions& optio
                 { QStringLiteral("report"), result.toJson(options.document) } });
         }
         const pdf::PreflightVerdict verdict = pdf::reducePreflightVerdict(result);
-        return verdict.state == pdf::PreflightVerdictState::Error
-                   ? PDFToolExitCode::PreflightError
-                   : PDFToolExitCode::PreflightIncomplete;
+        return static_cast<PDFToolExitCode>(pdf::preflightVerdictProcessExitCode(verdict.state));
     }
 
     QJsonObject jobSpec;
@@ -554,7 +534,7 @@ PDFToolExitCode PDFToolPreflightApplication::execute(const PDFToolOptions& optio
                 options.executionContext->setData(QJsonObject{
                     { QStringLiteral("report"), result.toJson(options.document) } });
             }
-            return PDFToolExitCode::PreflightIncomplete;
+            return static_cast<PDFToolExitCode>(pdf::preflightVerdictProcessExitCode(pdf::reducePreflightVerdict(result).state));
         }
     }
 
@@ -628,8 +608,7 @@ PDFToolExitCode PDFToolPreflightApplication::execute(const PDFToolOptions& optio
     }
 
     const QByteArray& sourceData = inspection.sourceData;
-    const QString revisionDigest = QString::fromLatin1(QCryptographicHash::hash(sourceData, QCryptographicHash::Sha256).toHex());
-    const QString profileDigest = QString::fromLatin1(resolved.effectiveHash);
+    const QByteArray revisionHash = QCryptographicHash::hash(sourceData, QCryptographicHash::Sha256);
 
     const bool cancelled = cancellationControl.isOperationCancelled();
     const bool jobSucceeded = !cancelled && inspection.inspectionRan;
@@ -658,47 +637,13 @@ PDFToolExitCode PDFToolPreflightApplication::execute(const PDFToolOptions& optio
         }
     }
 
-    result.profileResolution = resolved.provenance();
-    result.documentRevisionDigest = revisionDigest;
-    result.effectiveProfileDigest = profileDigest;
     result.decisions = decisions;
-
+    pdf::finalizePreflightResult(result, revisionHash, resolved);
     const pdf::PreflightVerdict verdict = pdf::reducePreflightVerdict(result);
-    result.pass = verdict.isPass();
-    PDFToolExitCode resultExitCode = PDFToolExitCode::PreflightError;
-    switch (verdict.state)
-    {
-        case pdf::PreflightVerdictState::Pass:
-            resultExitCode = PDFToolExitCode::Success;
-            break;
-        case pdf::PreflightVerdictState::Fail:
-            resultExitCode = PDFToolExitCode::Findings;
-            break;
-        case pdf::PreflightVerdictState::Incomplete:
-            resultExitCode = PDFToolExitCode::PreflightIncomplete;
-            break;
-        case pdf::PreflightVerdictState::Error:
-            resultExitCode = PDFToolExitCode::PreflightError;
-            break;
-    }
+    PDFToolExitCode resultExitCode = static_cast<PDFToolExitCode>(pdf::preflightVerdictProcessExitCode(verdict.state));
     if (cancelled)
     {
         resultExitCode = PDFToolExitCode::Cancelled;
-    }
-    if (options.preflightRequireSignoff && verdict.state == pdf::PreflightVerdictState::Fail)
-    {
-        for (const pdf::PreflightFinding& finding : result.errors)
-        {
-            if (!hasActiveSignoffForFinding(finding,
-                                            result.decisions,
-                                            result.documentRevisionDigest,
-                                            result.effectiveProfileDigest))
-            {
-                resultExitCode = PDFToolExitCode::Findings;
-                break;
-            }
-            resultExitCode = PDFToolExitCode::Success;
-        }
     }
 
     if (!exportDecisions(options.preflightDecisionsExportPath, result.decisions, decisionsError))
@@ -728,8 +673,8 @@ PDFToolExitCode PDFToolPreflightApplication::execute(const PDFToolOptions& optio
     QString historyError;
     if (!appendPreflightProvenance(options.document,
                                    sourceData,
-                                   revisionDigest,
-                                   profileDigest,
+                                   result.documentRevisionDigest,
+                                   result.effectiveProfileDigest,
                                    historyStatus,
                                    result.toJson(options.document),
                                    &historyError))

@@ -235,6 +235,43 @@ class CheckChangeTests(unittest.TestCase):
             )
         self.assertEqual([item.result for item in evidence], ["incomplete", "incomplete"])
 
+    def test_clang_tidy_falls_back_to_the_unversioned_binary(self) -> None:
+        """A machine carrying only `clang-tidy` (PyPI wheel / LLVM installer) must still run the lane."""
+        captured: list[list[str]] = []
+
+        def record(evidence, name, command, cwd, dry_run):
+            captured.append(command)
+
+        with tempfile.TemporaryDirectory() as directory:
+            build_dir = Path(directory)
+            (build_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+            with patch.object(MODULE, "add_result", side_effect=record), patch.object(
+                MODULE.shutil,
+                "which",
+                side_effect=lambda name: "/opt/bin/clang-tidy" if name == "clang-tidy" else None,
+            ):
+                MODULE.add_clang_tidy_checks(
+                    [],
+                    ["LoopLibCore/sources/example.cpp"],
+                    build_dir,
+                    dry_run=False,
+                )
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][0], "/opt/bin/clang-tidy")
+        self.assertEqual(captured[0][-1], "LoopLibCore/sources/example.cpp")
+
+    def test_clang_tidy_skips_manual_moc_includes(self) -> None:
+        self.assertEqual(
+            MODULE.clang_tidy_sources(
+                [
+                    "LoopLibCore/sources/example.cpp",
+                    "UnitTests/tst_budgetexhaustiontest.cpp",
+                ]
+            ),
+            ["LoopLibCore/sources/example.cpp"],
+        )
+
     def test_classify_still_uses_deleted_paths(self) -> None:
         policy = {
             "module_boundaries": {

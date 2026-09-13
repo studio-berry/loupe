@@ -24,6 +24,7 @@
 #include "pdfdocumentreader.h"
 #include "pdfsafefilewriter.h"
 #include "pdfutils.h"
+#include "ocrsidecarprotocol.h"
 
 #include <QFileInfo>
 #include <QCommandLineParser>
@@ -335,6 +336,10 @@ QList<PDFToolOptionDescriptor> PDFToolAbstractApplication::describeOptions(Optio
         add(QStringLiteral("output-intent"), { QStringLiteral("--output-intent") }, QStringLiteral("policy"), PDFToolValueType::Enum,
             { QStringLiteral("preserve-matching"), QStringLiteral("replace") }, QStringLiteral("replace"));
     }
+    if (optionFlags.testFlag(EmptyResultPolicy))
+    {
+        add(QStringLiteral("fail-if-empty"), { QStringLiteral("--fail-if-empty") }, {}, PDFToolValueType::Boolean);
+    }
     if (optionFlags.testFlag(DestructiveWrite))
     {
         add(QStringLiteral("dry-run"), { QStringLiteral("--dry-run") }, {}, PDFToolValueType::Boolean);
@@ -375,9 +380,9 @@ QList<PDFToolOptionDescriptor> PDFToolAbstractApplication::describeOptions(Optio
     if (optionFlags.testFlag(OcrOptions))
     {
         add(QStringLiteral("sidecar"), { QStringLiteral("--sidecar") }, QStringLiteral("path"), PDFToolValueType::Path);
-        add(QStringLiteral("dpi"), { QStringLiteral("--dpi") }, QStringLiteral("dpi"), PDFToolValueType::Integer, {}, QStringLiteral("300"));
-        add(QStringLiteral("languages"), { QStringLiteral("--languages") }, QStringLiteral("codes"), PDFToolValueType::Csv, {}, QStringLiteral("en"));
-        add(QStringLiteral("min-text-chars"), { QStringLiteral("--min-text-chars") }, QStringLiteral("n"), PDFToolValueType::Integer, {}, QStringLiteral("20"));
+        add(QStringLiteral("dpi"), { QStringLiteral("--dpi") }, QStringLiteral("dpi"), PDFToolValueType::Integer, {}, QString(pdftool::ocr::DEFAULT_OCR_DPI));
+        add(QStringLiteral("languages"), { QStringLiteral("--languages") }, QStringLiteral("codes"), PDFToolValueType::Csv, {}, QString(pdftool::ocr::DEFAULT_OCR_LANGUAGES));
+        add(QStringLiteral("min-text-chars"), { QStringLiteral("--min-text-chars") }, QStringLiteral("n"), PDFToolValueType::Integer, {}, QString(pdftool::ocr::DEFAULT_OCR_MIN_TEXT_CHARS));
     }
     if (optionFlags.testFlag(VerifyRedaction))
     {
@@ -644,6 +649,7 @@ QStringList PDFToolAbstractApplication::describeCapabilities(Options optionFlags
     add(Redact, QStringLiteral("document.redact"));
     add(VerifyRedaction, QStringLiteral("document.redaction.verify"));
     add(DestructiveWrite, QStringLiteral("document.write.destructive"));
+    add(EmptyResultPolicy, QStringLiteral("output.empty-result.policy"));
     add(AddBleed, QStringLiteral("fixup.add-bleed"));
     add(FlattenTransparency, QStringLiteral("fixup.flatten-transparency"));
     add(RgbToCmyk, QStringLiteral("fixup.rgb-to-cmyk"));
@@ -797,6 +803,12 @@ void PDFToolAbstractApplication::initializeCommandLineParser(QCommandLineParser*
         addDescribedOption(parser, optionDescriptors, QStringLiteral("output-intent"), QStringLiteral("OutputIntent policy: replace|preserve-matching."));
     }
 
+    if (optionFlags.testFlag(EmptyResultPolicy))
+    {
+        addDescribedOption(parser, optionDescriptors, QStringLiteral("fail-if-empty"),
+                           QStringLiteral("Exit with 1 (findings) when the command extracted nothing."));
+    }
+
     if (optionFlags.testFlag(DestructiveWrite))
     {
         // add-bleed keeps --overwrite/--dry-run/--report shared with unite/separate via
@@ -838,9 +850,9 @@ void PDFToolAbstractApplication::initializeCommandLineParser(QCommandLineParser*
     if (optionFlags.testFlag(OcrOptions))
     {
         parser->addOption(QCommandLineOption("sidecar", "Path to LoopOcrService executable.", "path"));
-        parser->addOption(QCommandLineOption("dpi", "Rasterization DPI for OCR pages.", "dpi", "300"));
-        parser->addOption(QCommandLineOption("languages", "Comma-separated EasyOCR language codes.", "codes", "en"));
-        parser->addOption(QCommandLineOption("min-text-chars", "Skip OCR when page has at least this many non-whitespace characters.", "n", "20"));
+        parser->addOption(QCommandLineOption("dpi", "Rasterization DPI for OCR pages.", "dpi", QString(pdftool::ocr::DEFAULT_OCR_DPI)));
+        parser->addOption(QCommandLineOption("languages", "Comma-separated EasyOCR language codes (ISO 639-1).", "codes", QString(pdftool::ocr::DEFAULT_OCR_LANGUAGES)));
+        parser->addOption(QCommandLineOption("min-text-chars", "Skip OCR when page has at least this many non-whitespace characters.", "n", QString(pdftool::ocr::DEFAULT_OCR_MIN_TEXT_CHARS)));
     }
 
     if (optionFlags.testFlag(VerifyRedaction))
@@ -2218,6 +2230,11 @@ PDFToolOptions PDFToolAbstractApplication::getOptions(QCommandLineParser* parser
         options.encryptionPermissions = parser->value("enc-permissions").toUInt();
     }
 
+    if (optionFlags.testFlag(EmptyResultPolicy))
+    {
+        options.failIfEmpty = parser->isSet("fail-if-empty");
+    }
+
     if (optionFlags.testFlag(DestructiveWrite))
     {
         options.destructiveDryRun = parser->isSet("dry-run");
@@ -2374,6 +2391,40 @@ bool PDFToolAbstractApplication::readDocumentOnHeap(const PDFToolOptions& option
     }
 
     return true;
+}
+
+PDFToolExitCode PDFToolAbstractApplication::reportEmptyResult(const PDFToolOptions& options,
+                                                              const QString& subject,
+                                                              PDFToolExitCode successCode) const
+{
+    const bool fail = options.failIfEmpty;
+    const QJsonObject context{ { QStringLiteral("subject"), subject },
+                               { QStringLiteral("fail_if_empty"), fail } };
+
+    if (fail)
+    {
+        reportDiagnostic(options,
+                         PDFToolDiagnosticSeverity::Error,
+                         QStringLiteral("output.empty-result"),
+                         PDFToolTranslationContext::tr("No %1 were extracted from document '%2', and --fail-if-empty was requested.").arg(subject, options.document),
+                         context);
+        return PDFToolExitCode::Findings;
+    }
+
+    // Without the flag this stays a machine-readable note only: extraction
+    // commands are informational by default and must not start writing to stderr
+    // on documents that simply have nothing to extract.
+    if (options.executionContext)
+    {
+        PDFToolDiagnostic diagnostic;
+        diagnostic.severity = PDFToolDiagnosticSeverity::Info;
+        diagnostic.code = QStringLiteral("output.empty-result");
+        diagnostic.message = PDFToolTranslationContext::tr("No %1 were extracted from document '%2'.").arg(subject, options.document);
+        diagnostic.context = context;
+        options.executionContext->addDiagnostic(std::move(diagnostic));
+    }
+
+    return successCode;
 }
 
 void PDFToolAbstractApplication::reportDiagnostic(const PDFToolOptions& options,

@@ -11,6 +11,7 @@ Canonical milestone text for [studio-berry/loop](https://github.com/studio-berry
 | 0.1.0 | 5 | Shipped as `0.1.0-alpha` | — |
 | 0.1.1 | 4 | Living | 0.0.3 |
 | 0.2.0 | 8 | Living | 0.0.4 (supersedes retired `0.1.2` title) |
+| 0.2.1 | 17 | Living | — |
 | 0.3.0 | 9 | Living | 0.0.5 (supersedes retired `0.1.3` title) |
 | 0.4.0 | 10 | Living | 0.0.6 (supersedes retired `0.1.4` title) |
 | 0.5.0 | 11 | Planned (proposed) | — |
@@ -18,8 +19,8 @@ Canonical milestone text for [studio-berry/loop](https://github.com/studio-berry
 | 0.7.0 | 13 | Planned (proposed) | 0.8.0 (former title; also consolidates retired `0.9.0`) |
 | 0.8.0 | 14 | Planned (proposed) | 0.10.0 (retired 2026-09-06 consolidation title) |
 
-The living release train is **0.1.1 → 0.2.0 → 0.3.0 → 0.4.0**, continuing into the amended
-planned train **0.5.0 → 0.6.0 → 0.7.0 → 0.8.0**.
+The living release train is **0.1.1 → 0.2.0 → 0.2.1 → 0.3.0 → 0.4.0**, continuing into the amended
+planned train **0.5.0 → 0.6.0 → 0.7.0 → 0.8.0**. Retired `0.1.2`–`0.1.4` GitHub milestone titles are closed by the sync script.
 
 ## Consolidation amendment (2026-09-06)
 

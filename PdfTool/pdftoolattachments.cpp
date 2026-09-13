@@ -79,6 +79,10 @@ PDFToolExitCode PDFToolAttachmentsApplication::execute(const PDFToolOptions& opt
 
     QMimeDatabase mimeDatabase;
 
+    const bool saveRequested = options.attachmentsSaveAll ||
+                               !options.attachmentsSaveNumber.isEmpty() ||
+                               !options.attachmentsSaveFileName.isEmpty();
+
     size_t savedFileCount = 0;
     size_t no = 1;
     std::vector<FileInfo> embeddedFiles;
@@ -168,6 +172,14 @@ PDFToolExitCode PDFToolAttachmentsApplication::execute(const PDFToolOptions& opt
         {
             PDFConsole::writeText(formatter.getString(), options.outputCodec);
         }
+
+        // Two different situations reach this branch: a plain listing, and a
+        // --save-* selection that matched nothing. Both produced no file, which
+        // is what --fail-if-empty asks about.
+        if (embeddedFiles.empty() || saveRequested)
+        {
+            return reportEmptyResult(options, PDFToolTranslationContext::tr("attachments"));
+        }
     }
     else
     {
@@ -217,8 +229,7 @@ PDFToolExitCode PDFToolAttachmentsApplication::execute(const PDFToolOptions& opt
             options.executionContext->setData(QJsonObject{
                 { QStringLiteral("operation"), QStringLiteral("attachments") },
                 { QStringLiteral("dry_run"), options.destructiveDryRun },
-                { QStringLiteral("selected_count"), static_cast<qint64>(savedFileCount) }
-            });
+                { QStringLiteral("selected_count"), static_cast<qint64>(savedFileCount) } });
         }
 
         bool anyAttachmentSkipped = false;
@@ -238,12 +249,10 @@ PDFToolExitCode PDFToolAttachmentsApplication::execute(const PDFToolOptions& opt
             {
                 if (options.executionContext)
                 {
-                    options.executionContext->addOutput({
-                        QStringLiteral("file"),
-                        QStringLiteral("attachment"),
-                        outputFile,
-                        QStringLiteral("planned")
-                    });
+                    options.executionContext->addOutput({ QStringLiteral("file"),
+                                                          QStringLiteral("attachment"),
+                                                          outputFile,
+                                                          QStringLiteral("planned") });
                 }
                 continue;
             }
@@ -255,41 +264,35 @@ PDFToolExitCode PDFToolAttachmentsApplication::execute(const PDFToolOptions& opt
                 const pdf::PDFOperationResult writeResult = pdf::PDFSafeFileWriter::writeData(outputFile, data, pdf::PDFSafeFileWriter::OverwritePolicy::Overwrite);
                 if (!writeResult)
                 {
-                    reportDiagnostic(options, PDFToolDiagnosticSeverity::Error, QStringLiteral("output.write-failed"), PDFToolTranslationContext::tr("Failed to save attachment to file '%1'. %2").arg(outputFile, writeResult.getErrorMessage()), QJsonObject{{QStringLiteral("path"), outputFile}});
+                    reportDiagnostic(options, PDFToolDiagnosticSeverity::Error, QStringLiteral("output.write-failed"), PDFToolTranslationContext::tr("Failed to save attachment to file '%1'. %2").arg(outputFile, writeResult.getErrorMessage()), QJsonObject{ { QStringLiteral("path"), outputFile } });
                     if (options.executionContext)
                     {
-                        options.executionContext->addOutput({
-                            QStringLiteral("file"),
-                            QStringLiteral("attachment"),
-                            outputFile,
-                            QStringLiteral("partial")
-                        });
+                        options.executionContext->addOutput({ QStringLiteral("file"),
+                                                              QStringLiteral("attachment"),
+                                                              outputFile,
+                                                              QStringLiteral("partial") });
                     }
                     return writtenCount > 0 ? PDFToolExitCode::PartialOutput : PDFToolExitCode::ProcessingFailure;
                 }
 
                 if (options.executionContext)
                 {
-                    options.executionContext->addOutput({
-                        QStringLiteral("file"),
-                        QStringLiteral("attachment"),
-                        outputFile,
-                        QStringLiteral("written")
-                    });
+                    options.executionContext->addOutput({ QStringLiteral("file"),
+                                                          QStringLiteral("attachment"),
+                                                          outputFile,
+                                                          QStringLiteral("written") });
                 }
                 ++writtenCount;
             }
-            catch (const pdf::PDFException &e)
+            catch (const pdf::PDFException& e)
             {
-                reportDiagnostic(options, PDFToolDiagnosticSeverity::Error, QStringLiteral("output.write-failed"), PDFToolTranslationContext::tr("Failed to save attachment to file. %1").arg(e.getMessage()), QJsonObject{{QStringLiteral("path"), outputFile}});
+                reportDiagnostic(options, PDFToolDiagnosticSeverity::Error, QStringLiteral("output.write-failed"), PDFToolTranslationContext::tr("Failed to save attachment to file. %1").arg(e.getMessage()), QJsonObject{ { QStringLiteral("path"), outputFile } });
                 if (options.executionContext)
                 {
-                    options.executionContext->addOutput({
-                        QStringLiteral("file"),
-                        QStringLiteral("attachment"),
-                        outputFile,
-                        QStringLiteral("partial")
-                    });
+                    options.executionContext->addOutput({ QStringLiteral("file"),
+                                                          QStringLiteral("attachment"),
+                                                          outputFile,
+                                                          QStringLiteral("partial") });
                 }
                 return writtenCount > 0 ? PDFToolExitCode::PartialOutput : PDFToolExitCode::ProcessingFailure;
             }
@@ -306,7 +309,7 @@ PDFToolExitCode PDFToolAttachmentsApplication::execute(const PDFToolOptions& opt
 
 PDFToolAbstractApplication::Options PDFToolAttachmentsApplication::getOptionsFlags() const
 {
-    return ConsoleFormat | OpenDocument | Attachments | DestructiveWrite;
+    return ConsoleFormat | OpenDocument | Attachments | DestructiveWrite | EmptyResultPolicy;
 }
 
 }   // namespace pdftool

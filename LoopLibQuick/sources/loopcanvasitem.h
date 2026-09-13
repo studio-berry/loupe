@@ -40,6 +40,7 @@
 #include <qqmlintegration.h>
 
 #include <atomic>
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 class QQuickWindow;
@@ -120,6 +121,12 @@ public:
     /// The recorder the canvas reports present timing to. Absent by default.
     void setTraceRecorder(pdfinteraction::InteractionTraceRecorder* recorder);
     pdfinteraction::InteractionTraceRecorder* traceRecorder() const noexcept { return m_recorder; }
+
+    /// Creates a recorder sharing this item's monotonic clock when needed.
+    pdfinteraction::InteractionTraceRecorder* ensureTraceRecorder();
+
+    /// Supplies privacy-safe scheduler work kinds at frame close.
+    void setAsyncWorkKindsProvider(CanvasPresentMetrics::AsyncWorkKindsProvider provider);
 
     CanvasPresentMetrics* presentMetrics() noexcept { return &m_present; }
 
@@ -234,6 +241,7 @@ private:
     pdfinteraction::InteractionController* m_interaction = nullptr;
     pdfinteraction::PageSurfaceCoordinator* m_surfaces = nullptr;
     pdfinteraction::InteractionTraceRecorder* m_recorder = nullptr;
+    std::unique_ptr<pdfinteraction::InteractionTraceRecorder> m_ownedRecorder;
 
     SteadyMonotonicClock m_clock;
     CanvasPresentMetrics m_present;

@@ -25,6 +25,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 class FilenameSanitizerTest : public QObject
@@ -48,6 +49,7 @@ private slots:
     void test_isPathContained_safe();
     void test_isPathContained_traversal();
     void test_isPathContained_symlinkParent();
+    void test_isPathContained_targetNotCreatedYet();
     void test_attachmentOpenPath_contained();
 };
 
@@ -178,6 +180,23 @@ void FilenameSanitizerTest::test_isPathContained_symlinkParent()
 
     const QString escaped = QDir(linkParent).filePath(QStringLiteral("escape.txt"));
     QVERIFY(!pdf::PDFFilenameSanitizer::isPathContained(escaped, realTarget));
+}
+
+void FilenameSanitizerTest::test_isPathContained_targetNotCreatedYet()
+{
+    // Callers validate a planned output before creating its directory. That must
+    // not read as "escapes the target" simply because nothing exists yet.
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString target = tempDir.filePath(QStringLiteral("not-created-yet"));
+    QVERIFY(!QFileInfo::exists(target));
+
+    QVERIFY(pdf::PDFFilenameSanitizer::isPathContained(target + QStringLiteral("/file.pdf"), target));
+
+    // Traversal is still refused without the directory existing.
+    QVERIFY(!pdf::PDFFilenameSanitizer::isPathContained(target + QStringLiteral("/../../escape.pdf"), target));
+    QVERIFY(!pdf::PDFFilenameSanitizer::isPathContained(target, target));
 }
 
 void FilenameSanitizerTest::test_attachmentOpenPath_contained()

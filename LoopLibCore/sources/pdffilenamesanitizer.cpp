@@ -89,17 +89,32 @@ QString PDFFilenameSanitizer::sanitize(const QString& rawFilename, const QString
 
 bool PDFFilenameSanitizer::isPathContained(const QString& resolvedPath, const QString& targetDirectory)
 {
-    const QString canonicalTarget = QDir(targetDirectory).canonicalPath();
+    // A target that does not exist yet cannot be canonicalized, but callers
+    // legitimately validate a planned output before creating its directory. Fall
+    // back to the cleaned absolute path in that case: traversal is still caught,
+    // because cleanPath() resolves "..", and there is no symlink to resolve in a
+    // directory that does not exist. Note that the *file* side keeps its
+    // stricter rule below - a name whose parent is a symlink is not treated as
+    // contained even when it resolves inside the target.
+    QString canonicalTarget = QDir(targetDirectory).canonicalPath();
     if (canonicalTarget.isEmpty())
     {
-        // Target directory does not exist — cannot verify containment
-        return false;
+        if (targetDirectory.isEmpty())
+        {
+            return false;
+        }
+
+        canonicalTarget = QDir::cleanPath(QDir(targetDirectory).absolutePath());
+        if (canonicalTarget.isEmpty())
+        {
+            return false;
+        }
     }
 
     const QString canonicalFilePath = QFileInfo(resolvedPath).canonicalFilePath();
     const QString canonicalFile = canonicalFilePath.isEmpty()
-            ? QDir::cleanPath(QFileInfo(resolvedPath).absoluteFilePath())
-            : canonicalFilePath;
+                                      ? QDir::cleanPath(QFileInfo(resolvedPath).absoluteFilePath())
+                                      : canonicalFilePath;
 
     // The file path must start with the target directory path followed by a separator
     if (canonicalFile == canonicalTarget)
@@ -107,8 +122,7 @@ bool PDFFilenameSanitizer::isPathContained(const QString& resolvedPath, const QS
         return false;
     }
 
-    return canonicalFile.startsWith(canonicalTarget + QLatin1Char('/'))
-        || canonicalFile.startsWith(canonicalTarget + QLatin1Char('\\'));
+    return canonicalFile.startsWith(canonicalTarget + QLatin1Char('/')) || canonicalFile.startsWith(canonicalTarget + QLatin1Char('\\'));
 }
 
 }   // namespace pdf

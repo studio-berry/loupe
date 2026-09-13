@@ -78,6 +78,21 @@ set_target_properties(UnitTestsJobScheduler PROPERTIES
 
 add_test(UnitTestsJobScheduler "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsJobScheduler")
 
+add_executable(UnitTestsBlockingThreadGuard
+    tst_blockingthreadguardtest.cpp
+)
+
+target_link_libraries(UnitTestsBlockingThreadGuard PRIVATE LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+
+set_target_properties(UnitTestsBlockingThreadGuard PROPERTIES
+    WIN32_EXECUTABLE OFF
+    MACOSX_BUNDLE OFF
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_LIB_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
+)
+
+add_test(UnitTestsBlockingThreadGuard "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsBlockingThreadGuard")
+
 add_executable(UnitTestsRevisionStress
     tst_revisionstresstest.cpp
 )
@@ -177,6 +192,8 @@ add_executable(UnitTestsDiagnostics
 )
 
 target_link_libraries(UnitTestsDiagnostics PRIVATE LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+target_include_directories(UnitTestsDiagnostics PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/UnitTestsDiagnostics_autogen/include)
 
 set_target_properties(UnitTestsDiagnostics PROPERTIES
     WIN32_EXECUTABLE OFF
@@ -187,6 +204,12 @@ set_target_properties(UnitTestsDiagnostics PROPERTIES
 # Test name is lower-case (unlike sibling targets) so it matches
 # `ctest -R diagnostics` as documented in docs/PRODUCTION_RUNBOOK.md.
 add_test(diagnostics  "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsDiagnostics")
+# Alias matching the target name so agent-fast policy entry
+# `UnitTestsDiagnostics` both builds and selects this test via
+# `ctest -R ^UnitTestsDiagnostics$`. Keeps the documented `diagnostics`
+# name intact while letting check-change.py (which uses one list for
+# both `cmake --build --target <name>` and `ctest -R <name>`) cover it.
+add_test(UnitTestsDiagnostics "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsDiagnostics")
 
 add_executable(UnitTestsContentEditor
 	tst_contenteditortest.cpp
@@ -299,7 +322,9 @@ add_executable(UnitTestsPreflightVerdict
     tst_preflightverdicttest.cpp
 )
 
-target_link_libraries(UnitTestsPreflightVerdict PRIVATE LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+target_link_libraries(UnitTestsPreflightVerdict PRIVATE LoopLibCore LoopLibInteraction Qt6::Core Qt6::Gui Qt6::Test)
+target_include_directories(UnitTestsPreflightVerdict PRIVATE
+    ${CMAKE_SOURCE_DIR}/LoopLibInteraction/sources)
 
 set_target_properties(UnitTestsPreflightVerdict PROPERTIES
     WIN32_EXECUTABLE OFF
@@ -308,6 +333,22 @@ set_target_properties(UnitTestsPreflightVerdict PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
 )
 add_test(UnitTestsPreflightVerdict "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsPreflightVerdict")
+
+add_executable(UnitTestsPreflightInteraction
+    tst_preflightinteraction.cpp
+)
+
+target_link_libraries(UnitTestsPreflightInteraction PRIVATE LoopLibCore LoopLibInteraction Qt6::Core Qt6::Gui Qt6::Test)
+target_include_directories(UnitTestsPreflightInteraction PRIVATE
+    ${CMAKE_SOURCE_DIR}/LoopLibInteraction/sources)
+
+set_target_properties(UnitTestsPreflightInteraction PROPERTIES
+    WIN32_EXECUTABLE OFF
+    MACOSX_BUNDLE OFF
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_LIB_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
+)
+add_test(UnitTestsPreflightInteraction "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsPreflightInteraction")
 
 add_executable(UnitTestsSchemaEvolution
     tst_schemaevolutiontest.cpp
@@ -512,7 +553,8 @@ add_executable(UnitTestsPdfToolContract
 target_link_libraries(UnitTestsPdfToolContract PRIVATE Qt6::Core Qt6::Test)
 add_dependencies(UnitTestsPdfToolContract PdfTool)
 target_compile_definitions(UnitTestsPdfToolContract PRIVATE
-    PDFTOOL_EXECUTABLE_PATH="$<TARGET_FILE:PdfTool>")
+    PDFTOOL_EXECUTABLE_PATH="$<TARGET_FILE:PdfTool>"
+    LOOP_PREFLIGHT_SOURCE_DIR="${CMAKE_SOURCE_DIR}/loop-preflight")
 
 set_target_properties(UnitTestsPdfToolContract PROPERTIES
     WIN32_EXECUTABLE OFF
@@ -589,6 +631,40 @@ if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY)
     add_test(UnitTestsOverprintRender "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsOverprintRender")
 endif()
 
+# Guarded the same way LoopLibQuick's own add_subdirectory() is (see the top-level
+# CMakeLists.txt): the tools/legacy-host build (LOOP_BUILD_ONLY_CORE_LIBRARY, or
+# LOOP_BUILD_QUICK_CANVAS off) must not descend into anything that requires it.
+#
+# This compiles the design-system token/state-mapping sources directly rather
+# than linking the LoopLibQuick target: they depend on QColor only, not on
+# Qt Quick/Qml, and linking the SHARED LoopLibQuick library from a plain
+# add_executable() test would be the first such link edge in this file --
+# every other LoopLibQuick consumer uses qt_add_executable() plus
+# qt_import_qml_plugins() (see ProductQuickAccessibilitySmoke/CMakeLists.txt),
+# neither of which this test needs.
+if(NOT LOOP_BUILD_ONLY_CORE_LIBRARY AND LOOP_BUILD_QUICK_CANVAS)
+    add_executable(UnitTestsLoopStateVisual
+        tst_loopstatevisualtest.cpp
+        ${CMAKE_SOURCE_DIR}/LoopLibQuick/sources/looptokens.cpp
+        ${CMAKE_SOURCE_DIR}/LoopLibQuick/sources/loopstatevisual.cpp
+    )
+
+    target_include_directories(UnitTestsLoopStateVisual PRIVATE
+        ${CMAKE_SOURCE_DIR}/LoopLibQuick/sources
+        ${CMAKE_BINARY_DIR}/${INSTALL_INCLUDEDIR}
+    )
+    target_compile_definitions(UnitTestsLoopStateVisual PRIVATE LoopLibQuick_EXPORTS)
+    target_link_libraries(UnitTestsLoopStateVisual PRIVATE LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+
+    set_target_properties(UnitTestsLoopStateVisual PROPERTIES
+        WIN32_EXECUTABLE OFF
+        MACOSX_BUNDLE OFF
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_LIB_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}
+    )
+    add_test(UnitTestsLoopStateVisual "${CMAKE_BINARY_DIR}/${LOOP_INSTALL_BIN_DIR}/UnitTestsLoopStateVisual")
+endif()
+
 add_executable(UnitTestsPageMasterExport
 	tst_pagemasterexporttest.cpp
 )
@@ -626,6 +702,8 @@ add_executable(UnitTestsFilenameSanitizer
 )
 
 target_link_libraries(UnitTestsFilenameSanitizer PRIVATE LoopLibCore Qt6::Core Qt6::Test)
+target_include_directories(UnitTestsFilenameSanitizer PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/UnitTestsFilenameSanitizer_autogen/include)
 
 set_target_properties(UnitTestsFilenameSanitizer PROPERTIES
     WIN32_EXECUTABLE OFF
@@ -640,6 +718,8 @@ add_executable(UnitTestsSafeFileWriter
 )
 
 target_link_libraries(UnitTestsSafeFileWriter PRIVATE LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+target_include_directories(UnitTestsSafeFileWriter PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/UnitTestsSafeFileWriter_autogen/include)
 
 set_target_properties(UnitTestsSafeFileWriter PROPERTIES
     WIN32_EXECUTABLE OFF
@@ -668,6 +748,8 @@ add_executable(UnitTestsJbig2Decoder
 )
 
 target_link_libraries(UnitTestsJbig2Decoder PRIVATE LoopLibCore Qt6::Core Qt6::Gui Qt6::Test)
+target_include_directories(UnitTestsJbig2Decoder PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/UnitTestsJbig2Decoder_autogen/include)
 
 set_target_properties(UnitTestsJbig2Decoder PROPERTIES
     WIN32_EXECUTABLE OFF

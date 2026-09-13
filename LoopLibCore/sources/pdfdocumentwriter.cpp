@@ -252,7 +252,7 @@ PDFOperationResult PDFDocumentWriter::write(QIODevice* device, const PDFDocument
     PDFDictionary trailerDictionary = *document->getTrailerDictionary();
     PDFDictionary newTrailerDictionary;
 
-    for (const char* entry : { "Size", "Root", "Encrypt", "Info", "ID"})
+    for (const char* entry : { "Size", "Root", "Encrypt", "Info", "ID" })
     {
         PDFObject object = trailerDictionary.get(entry);
         if (!object.isNull())
@@ -284,9 +284,18 @@ PDFOperationResult PDFDocumentWriter::write(QIODevice* device, const PDFDocument
 }
 
 PDFOperationResult PDFDocumentWriter::writeIncremental(const QString& fileName,
-                                                        const PDFDocument* originalDocument,
-                                                        const PDFDocument* document,
-                                                        bool safeWrite)
+                                                       const PDFDocument* originalDocument,
+                                                       const PDFDocument* document,
+                                                       bool safeWrite)
+{
+    return writeIncremental(fileName, originalDocument, document, safeWrite, nullptr);
+}
+
+PDFOperationResult PDFDocumentWriter::writeIncremental(const QString& fileName,
+                                                       const PDFDocument* originalDocument,
+                                                       const PDFDocument* document,
+                                                       bool safeWrite,
+                                                       IncrementalWriteOutcome* outcome)
 {
     if (!originalDocument || !document)
     {
@@ -311,14 +320,23 @@ PDFOperationResult PDFDocumentWriter::writeIncremental(const QString& fileName,
             return tr("File '%1' can't be opened for incremental save. %2").arg(fileName, targetFile.errorString());
         }
 
-        const PDFOperationResult result = writeIncremental(&targetFile, originalData, originalDocument, document);
-        if (result && !targetFile.commit())
-        {
-            return tr("File '%1' can't be committed after incremental save. %2").arg(fileName, targetFile.errorString());
-        }
+        // The nested write reports what it did on success, but a successful
+        // write is not a successful save: commit() can still fail. Hold the
+        // outcome locally and publish it only once the rename has landed.
+        IncrementalWriteOutcome nestedOutcome = IncrementalWriteOutcome::CopiedUnchanged;
+        const PDFOperationResult result = writeIncremental(&targetFile, originalData, originalDocument, document, &nestedOutcome);
         if (!result)
         {
             targetFile.cancelWriting();
+            return result;
+        }
+        if (!targetFile.commit())
+        {
+            return tr("File '%1' can't be committed after incremental save. %2").arg(fileName, targetFile.errorString());
+        }
+        if (outcome)
+        {
+            *outcome = nestedOutcome;
         }
         return result;
     }
@@ -329,15 +347,29 @@ PDFOperationResult PDFDocumentWriter::writeIncremental(const QString& fileName,
         return tr("File '%1' can't be opened for incremental save. %2").arg(fileName, targetFile.errorString());
     }
 
-    const PDFOperationResult result = writeIncremental(&targetFile, originalData, originalDocument, document);
+    IncrementalWriteOutcome nestedOutcome = IncrementalWriteOutcome::CopiedUnchanged;
+    const PDFOperationResult result = writeIncremental(&targetFile, originalData, originalDocument, document, &nestedOutcome);
     targetFile.close();
+    if (result && outcome)
+    {
+        *outcome = nestedOutcome;
+    }
     return result;
 }
 
 PDFOperationResult PDFDocumentWriter::writeIncremental(QIODevice* device,
-                                                        const QByteArray& originalData,
-                                                        const PDFDocument* originalDocument,
-                                                        const PDFDocument* document)
+                                                       const QByteArray& originalData,
+                                                       const PDFDocument* originalDocument,
+                                                       const PDFDocument* document)
+{
+    return writeIncremental(device, originalData, originalDocument, document, nullptr);
+}
+
+PDFOperationResult PDFDocumentWriter::writeIncremental(QIODevice* device,
+                                                       const QByteArray& originalData,
+                                                       const PDFDocument* originalDocument,
+                                                       const PDFDocument* document,
+                                                       IncrementalWriteOutcome* outcome)
 {
     if (!device || !device->isWritable() || !originalDocument || !document)
     {
@@ -411,9 +443,20 @@ PDFOperationResult PDFDocumentWriter::writeIncremental(QIODevice* device,
 
     if (changedObjects.empty())
     {
-        return device->write(originalData) == originalData.size()
-                   ? PDFOperationResult(true)
-                   : PDFOperationResult(tr("Failed to copy the original PDF bytes."));
+        // Nothing changed, so there is nothing to append. The bytes are copied
+        // verbatim - which is the right output - but it is not an append, and a
+        // caller that asked for one is told so through \p outcome.
+        if (device->write(originalData) != originalData.size())
+        {
+            return PDFOperationResult(tr("Failed to copy the original PDF bytes."));
+        }
+
+        if (outcome)
+        {
+            *outcome = IncrementalWriteOutcome::CopiedUnchanged;
+        }
+
+        return PDFOperationResult(true);
     }
 
     if (device->write(originalData) != originalData.size())
@@ -516,12 +559,17 @@ PDFOperationResult PDFDocumentWriter::writeIncremental(QIODevice* device,
     writeCRLF(device);
     device->write("%%EOF");
 
+    if (outcome)
+    {
+        *outcome = IncrementalWriteOutcome::Appended;
+    }
+
     return true;
 }
 
 PDFDocumentWriter::WriteMode PDFDocumentWriter::getRecommendedWriteMode(const PDFDocument* sourceDocument,
-                                                                          bool requiresFullRewrite,
-                                                                          bool saveAsNewOutput)
+                                                                        bool requiresFullRewrite,
+                                                                        bool saveAsNewOutput)
 {
     return getRecommendedWriteMode(sourceDocument,
                                    requiresFullRewrite
@@ -531,8 +579,8 @@ PDFDocumentWriter::WriteMode PDFDocumentWriter::getRecommendedWriteMode(const PD
 }
 
 PDFDocumentWriter::WriteMode PDFDocumentWriter::getRecommendedWriteMode(const PDFDocument* sourceDocument,
-                                                                          const PDFOperationSavePolicy& policy,
-                                                                          bool saveAsNewOutput)
+                                                                        const PDFOperationSavePolicy& policy,
+                                                                        bool saveAsNewOutput)
 {
     if (policy.mode != PDFSaveMode::IncrementalAppend || saveAsNewOutput || !sourceDocument)
     {
@@ -626,7 +674,7 @@ qint64 getPreviousXrefOffset(const QByteArray& data)
     return ok ? result : -1;
 }
 
-} // namespace
+}   // namespace
 
 class PDFSizeCounterIODevice : public QIODevice
 {
@@ -634,7 +682,6 @@ public:
     explicit PDFSizeCounterIODevice(QObject* parent) :
         QIODevice(parent)
     {
-
     }
 
     virtual bool isSequential() const override;

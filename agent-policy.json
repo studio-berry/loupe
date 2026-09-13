@@ -57,26 +57,36 @@
         "LoopLibCore/**",
         "UnitTests/tst_bleedfixuptest.cpp",
         "UnitTests/tst_budgetcorpustest.cpp",
+        "UnitTests/tst_budgetexhaustiontest.cpp",
+        "UnitTests/tst_diagnosticstest.cpp",
         "UnitTests/tst_documentsessiontest.cpp",
+        "UnitTests/tst_filenamesanitizertest.cpp",
         "UnitTests/tst_incrementalsavetest.cpp",
+        "UnitTests/tst_jbig2decodertest.cpp",
         "UnitTests/tst_lifecycletest.cpp",
         "UnitTests/tst_overprinttest.cpp",
-        "UnitTests/tst_revisionstresstest.cpp"
+        "UnitTests/tst_revisionstresstest.cpp",
+        "UnitTests/tst_safefilewritertest.cpp"
       ],
       "targets": ["LoopLibCore"],
       "tests": [
         "UnitTests",
         "UnitTestsBenchmarkIdentity",
+        "UnitTestsBlockingThreadGuard",
         "UnitTestsBleedFixup",
         "UnitTestsBudgetCorpus",
         "UnitTestsBudgetExhaustion",
+        "UnitTestsContentProcessorLimits",
         "UnitTestsConversionOracle",
+        "UnitTestsDiagnostics",
         "UnitTestsDocumentSession",
         "UnitTestsEvidenceGraph",
+        "UnitTestsFilenameSanitizer",
         "UnitTestsHugeDocumentEnvelope",
         "UnitTestsApplicationIdentity",
         "UnitTestsIdentitySeparation",
         "UnitTestsIncrementalSave",
+        "UnitTestsJbig2Decoder",
         "UnitTestsJobScheduler",
         "UnitTestsLifecycle",
         "UnitTestsOperationHistory",
@@ -89,6 +99,7 @@
         "UnitTestsPreflightVerdict",
         "UnitTestsProcessingBudget",
         "UnitTestsRevisionStress",
+        "UnitTestsSafeFileWriter",
         "UnitTestsSchemaEvolution",
         "UnitTestsStandardOracle",
         "UnitTestsWorkloadEnvelope"
@@ -106,6 +117,7 @@
         "UnitTestsPreflightChecks",
         "UnitTestsPreflightCorpus",
         "UnitTestsPreflightEngine",
+        "UnitTestsPreflightInteraction",
         "UnitTestsPreflightVerdict",
         "UnitTestsPreflightProfileResolver",
         "UnitTestsProfileIdentity",
@@ -128,6 +140,7 @@
         "UnitTests/tst_pagesurfacetest.cpp",
         "UnitTests/tst_pagesurfacebudgettest.cpp",
         "UnitTests/tst_interactioncontrollertest.cpp",
+        "UnitTests/tst_interactiontracecontracttest.cpp",
         "UnitTests/tst_overlayframetest.cpp",
         "UnitTests/tst_hittestsourcetest.cpp",
         "docs/interaction-boundary-policy.json",
@@ -135,7 +148,7 @@
         "scripts/verify-command-catalog.py"
       ],
       "targets": ["LoopLibInteraction"],
-      "tests": ["UnitTestsInteractionBoundary", "UnitTestsDocumentFacade", "UnitTestsViewportController", "UnitTestsViewportCommands", "UnitTestsPageSurface", "UnitTestsPageSurfaceBudget", "UnitTestsInteractionController", "UnitTestsOverlayFrame", "UnitTestsHitTestSource"]
+      "tests": ["UnitTestsInteractionBoundary", "UnitTestsDocumentFacade", "UnitTestsViewportController", "UnitTestsViewportCommands", "UnitTestsPageSurface", "UnitTestsPageSurfaceBudget", "UnitTestsInteractionController", "UnitTestsInteractionTraceContract", "UnitTestsOverlayFrame", "UnitTestsHitTestSource"]
     },
     "quick": {
       "paths": [
@@ -154,10 +167,11 @@
         "UnitTests/tst_productoperatorloop.cpp",
         "UnitTests/tst_quickaccessibilitytest.cpp",
         "UnitTests/tst_shellkeyboardtest.cpp",
+        "UnitTests/tst_loopstatevisualtest.cpp",
         "ProductQuickAccessibilitySmoke/**"
       ],
       "targets": ["LoopLibQuick", "LoopEditor", "ProductQuickAccessibilitySmoke"],
-      "tests": ["UnitTestsQuickCanvas", "UnitTestsCanvasParity", "UnitTestsEditorHost", "UnitTestsDocumentViewSession", "UnitTestsProductOperatorLoop", "UnitTestsQuickAccessibility", "UnitTestsShellKeyboard", "UnitTestsP4S9Interaction"]
+      "tests": ["UnitTestsQuickCanvas", "UnitTestsCanvasParity", "UnitTestsEditorHost", "UnitTestsDocumentViewSession", "UnitTestsProductOperatorLoop", "UnitTestsQuickAccessibility", "UnitTestsShellKeyboard", "UnitTestsP4S9Interaction", "UnitTestsLoopStateVisual"]
     },
     "developer_widgets": {
       "paths": [
